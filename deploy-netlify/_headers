@@ -1,0 +1,15 @@
+/tesseract/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=604800
+
+/tesseract/*.wasm.js
+  Cache-Control: public, max-age=604800
+
+/tesseract/*.traineddata.gz
+  Cache-Control: public, max-age=604800
+
+/*.js
+  Cache-Control: no-cache, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, must-revalidate
