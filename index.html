@@ -1,0 +1,3094 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="جرد المكتبة">
+<meta name="theme-color" content="#0f172a">
+<title>جرد المكتبة v5</title>
+<link rel="manifest" href="manifest.json">
+<style>
+:root {
+  --primary: #1a365d;
+  --primary-dark: #0f2440;
+  --primary-light: #e8eef6;
+  --success: #2d7a3a;
+  --success-light: #e6f4ea;
+  --accent-red: #e11931;
+  --warning: #d97706;
+  --warning-light: #fef3c7;
+  --error: #dc2626;
+  --error-light: #fee2e2;
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --text: #0f172a;
+  --text-secondary: #64748b;
+  --border: #e2e8f0;
+  --radius: 16px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,0.1);
+  --st: env(safe-area-inset-top, 20px);
+  --sb: env(safe-area-inset-bottom, 20px);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  position: fixed;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, 'SF Pro Arabic', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  direction: rtl;
+}
+
+/* HEADER */
+.hdr {
+  background: linear-gradient(135deg, #0f2440 0%, #1a365d 100%);
+  color: #ffffff;
+  padding: calc(var(--st) + 10px) 16px 12px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow);
+}
+
+.hdr-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.hdr-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #ffffff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.hdr-btn:active {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.hdr-btn.visible {
+  display: flex;
+}
+
+.hdr h1 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.hdr-badges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge {
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge-online {
+  background: var(--success);
+  color: #ffffff;
+}
+
+.badge-offline {
+  background: var(--text-secondary);
+  color: #ffffff;
+}
+
+.badge-synced {
+  background: var(--success);
+  color: #ffffff;
+}
+
+.badge-syncing {
+  background: var(--warning);
+  color: #ffffff;
+  animation: pulse 1s infinite;
+}
+
+.badge-sync-error {
+  background: var(--error);
+  color: #ffffff;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* CONTENT AREA */
+.content-wrapper {
+  position: fixed;
+  top: calc(56px + var(--st));
+  left: 0;
+  right: 0;
+  bottom: calc(56px + var(--sb));
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  z-index: 1;
+}
+
+/* PAGES */
+.page {
+  display: none;
+  padding: 16px;
+  padding-bottom: 16px;
+  min-height: 100%;
+  animation: slideIn 0.25s ease-out;
+}
+
+.page.active {
+  display: block;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* PULL TO REFRESH */
+.ptr-indicator {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  display: none;
+}
+
+.ptr-indicator.show {
+  display: block;
+}
+
+/* CARDS */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+  transition: all 0.15s ease;
+}
+
+.card.clickable {
+  cursor: pointer;
+}
+
+.card.clickable:active {
+  transform: scale(0.98);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.card-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* HERO SECTION */
+.hero {
+  background: linear-gradient(135deg, #1a365d 0%, #2d7a3a 100%);
+  color: #ffffff;
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 20px;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.hero-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.hero-subtitle {
+  font-size: 13px;
+  opacity: 0.9;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.stat-item {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 12px 8px;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+.stat-number {
+  font-size: 18px;
+  font-weight: 800;
+  display: block;
+}
+
+.stat-label {
+  font-size: 9px;
+  opacity: 0.85;
+  margin-top: 3px;
+  display: block;
+}
+
+/* SEARCH BAR */
+.search-box {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 14px 16px 14px 44px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  font-size: 16px;
+  background: var(--card);
+  font-family: inherit;
+  direction: auto;
+  transition: border-color 0.2s;
+}
+
+.search-box input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+/* BUTTONS */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 20px;
+  border-radius: 12px;
+  border: none;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+
+.btn:active {
+  opacity: 0.8;
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.btn-success {
+  background: var(--success);
+  color: #ffffff;
+}
+
+.btn-warning {
+  background: var(--warning);
+  color: #ffffff;
+}
+
+.btn-error {
+  background: var(--error);
+  color: #ffffff;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--text);
+}
+
+.btn-small {
+  padding: 9px 14px;
+  font-size: 13px;
+  width: auto;
+}
+
+.btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-row .btn {
+  flex: 1;
+}
+
+/* QUICK ACTION CARDS */
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.action-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 18px 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow);
+  border: 1.5px solid var(--border);
+}
+
+.action-card:active {
+  transform: scale(0.96);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.action-card.highlight {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.action-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.action-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.action-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* FILTER CHIPS */
+.filter-chips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 6px;
+}
+
+.chip {
+  padding: 7px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.chip.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+/* FORM ELEMENTS */
+.form-group {
+  margin-bottom: 14px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+
+.form-input {
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  font-size: 16px;
+  font-family: inherit;
+  background: var(--card);
+  direction: auto;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+select.form-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M6 8L1 3h10z' fill='%2364748b'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 14px center;
+  appearance: none;
+  padding-right: 40px;
+}
+
+/* SCAN MODE SELECTOR */
+.scan-modes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.scan-mode {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.scan-mode.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.scan-mode-icon {
+  font-size: 26px;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.scan-mode-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scan-hint {
+  background: var(--warning-light);
+  border: 1px solid #fbbf24;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  margin-bottom: 14px;
+  line-height: 1.6;
+  color: #92400e;
+}
+
+/* IMAGE PREVIEW */
+.image-container {
+  background: #000000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 14px;
+  min-height: 60px;
+  max-height: 280px;
+}
+
+.image-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-placeholder {
+  padding: 30px;
+  text-align: center;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  background: #1a202c;
+}
+
+/* LOADING STATE */
+.loading-container {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  margin-bottom: 14px;
+}
+
+.loading-container.show {
+  display: flex;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.loading-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.loading-method {
+  font-size: 11px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  padding: 3px 12px;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+/* OCR RESULTS */
+.ocr-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.ocr-field {
+  margin-bottom: 12px;
+}
+
+.ocr-field:last-child {
+  margin-bottom: 0;
+}
+
+.ocr-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ocr-value {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 600;
+  word-break: break-word;
+}
+
+/* MATCH RESULTS */
+.match-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  padding: 16px;
+  margin-bottom: 10px;
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+.match-card.best {
+  border-color: var(--success);
+  background: var(--success-light);
+}
+
+.match-badge {
+  position: absolute;
+  top: -10px;
+  right: 12px;
+  background: var(--success);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 12px;
+  border-radius: 10px;
+}
+
+.match-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 3px;
+  line-height: 1.4;
+}
+
+.match-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.match-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 13px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+.match-label {
+  color: var(--text-secondary);
+}
+
+.confidence-bar {
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.confidence-90 { background: var(--success); }
+.confidence-70 { background: var(--success); }
+.confidence-50 { background: var(--warning); }
+.confidence-40 { background: var(--warning); }
+.confidence-below { background: var(--error); }
+
+.match-breakdown {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* EMPTY STATE */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.empty-text {
+  font-size: 14px;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+/* DETAIL VIEW */
+.detail-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.detail-field {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-size: 13px;
+}
+
+.detail-field:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  flex: 0 0 100px;
+}
+
+.detail-value {
+  color: var(--text);
+  font-weight: 600;
+  flex: 1;
+  word-break: break-word;
+  text-align: left;
+}
+
+.barcode-display {
+  background: #ffffff;
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.barcode-text {
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 12px;
+  color: var(--text);
+  direction: ltr;
+}
+
+/* IMPORT/EXPORT */
+.import-section {
+  display: none;
+}
+
+.import-section.show {
+  display: block;
+}
+
+.import-hint {
+  background: var(--warning-light);
+  border: 1px solid #fbbf24;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 12px;
+  margin-bottom: 14px;
+  color: #92400e;
+  line-height: 1.5;
+}
+
+.import-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 14px;
+  font-size: 12px;
+  background: var(--card);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.import-table th,
+.import-table td {
+  padding: 10px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-table th {
+  background: var(--bg);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.import-table td {
+  color: var(--text-secondary);
+}
+
+.import-table tr:last-child td {
+  border-bottom: none;
+}
+
+.import-table select {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.sample-data {
+  overflow-x: auto;
+  font-size: 11px;
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+}
+
+.sample-data table {
+  white-space: nowrap;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sample-data th {
+  font-weight: 700;
+  padding: 6px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+.sample-data td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* SETTINGS */
+.settings-section {
+  margin-bottom: 20px;
+}
+
+.settings-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text);
+}
+
+.debug-panel {
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  padding: 0;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--bg);
+}
+
+.debug-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.debug-icon {
+  font-size: 16px;
+  transition: transform 0.2s ease;
+}
+
+.debug-icon.open {
+  transform: rotate(180deg);
+}
+
+.debug-content {
+  display: none;
+  padding: 12px 14px;
+  max-height: 300px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.debug-content.open {
+  display: block;
+}
+
+.debug-entry {
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  border-left: 2px solid var(--primary);
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.debug-entry.error {
+  border-left-color: var(--error);
+  background: #fff5f5;
+}
+
+.debug-entry.warning {
+  border-left-color: var(--warning);
+  background: #fffbeb;
+}
+
+.debug-time {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.debug-category {
+  display: inline-block;
+  font-size: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin: 0 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.debug-message {
+  color: var(--text);
+  margin-top: 2px;
+}
+
+.debug-buttons {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.debug-buttons .btn {
+  width: auto;
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.copyright {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 20px;
+}
+
+/* BOTTOM NAVIGATION */
+.bnav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: calc(56px + var(--sb));
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  display: flex;
+  z-index: 99;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.bnav-item {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-family: inherit;
+  gap: 4px;
+  padding: 6px;
+  transition: color 0.15s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.bnav-item.active {
+  color: var(--primary);
+}
+
+.bnav-icon {
+  font-size: 24px;
+}
+
+.bnav-label {
+  font-size: 9px;
+  font-weight: 700;
+  display: block;
+}
+
+/* UTILITIES */
+.hidden {
+  display: none !important;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.mt-0 { margin-top: 0; }
+.mb-0 { margin-bottom: 0; }
+
+@media (max-height: 600px) {
+  .page {
+    padding: 12px;
+  }
+  .hero {
+    padding: 16px;
+  }
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="hdr-left">
+    <button class="hdr-btn" id="hdrBack" onclick="goBack()">→</button>
+    <img src="data:image/png;base64,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" style="height:32px;border-radius:6px;margin-left:8px;" alt="KFAA">
+    <h1 id="hdrTitle">جرد المكتبة</h1>
+  </div>
+  <div class="hdr-badges">
+    <span class="badge badge-offline" id="connBadge">🔌</span>
+    <span class="badge badge-offline" id="syncBadge">⏳</span>
+    <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAMAAABOo35HAAAAY1BMVEXp5OHqzczrqavtGjvyeYTvVWXuPlLwaXX72t3////85Ob4xsn2r7X97u/60NP1o6r+9/f0lp785OX72tz97e73u7/ziZHyeYP50NP2r7T4xcnwaHT1o6nvVGT3ur/+9vfziJDkJ+jxAAAEJUlEQVR42u3a63abOBiF4TYISRhxagupm8zh/q+ygAT6BMSOuxrWzOr7/LJBQbDR0e2nTwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMB9n5/+AJ9/U1hP2R/gibAIi7AIi7AIi7D+42Eplb+vmP7NFRtlzgnLFotLqcRx7Q/G51KFtL037ar5eB2u0czf7HyqHT+1/nBeTl+KtjS76kPpzBW7Q1n41k3BhM/Lverm4kt2p4YV7ibotkduhmXa9Uw956ur9ZHmp3fyovHAY2HV61tYwzJVLKvPDauI/aiO93c/LN2KU6XIxYZzld5donk8rDbeVwhLV6Lw5Zywvnz9+k08wWR5fP2esPrknBIxDP7hfQO9yFKtfjiswsT7UqK3H3SMDwzrefzwPWlIw+4GfFiN8tKw5vfbNpm6xPHIDy6Vb1hiGKxU1o3Hqn5uxZ1zPp3SuU6EFaoxaVhuHbKSN+KyfKq4Hk4L6zp96JfD5fjlR+xUa1jqcDry99/rTPWxQOn7hm9f8QrtOFo1jdn+9fp37qDlxobWHIU1DpN5OZw1wI9hvXxLbnlqD1kRp7HlUccGMNpGtvQN2w9HA1noTPnSAa0z2Z2w5mpcLkrMrVfX4UMS1lRxp8+eDddmNLX2775nDgdjltuEVYuhKJ7btILQW72qux1W+ofzvc03s3wIp+RgWZ47G9bJiP2avcoAb4Vl2sNJqdpcdpAvpn8wrGHp1J2cDZOK9akta12qTI/5kv1VrIPz7bAy1R6dVdv1SNceJPHOsNQyl+ZvrLNEx/jQsH5cr3//I6qb7+d6vS7zdXzyi510uyF+WUinTesiRix/YVftH+0orLkaa2RYoctVm/JdHAPa02bDV1Fdc9Bfbs2G4xvujFbObhZhdhuWavJ8CIHZx2ZDNSwZJ+XNoMar1rvV38eG9SKqS1aP1d2w3CWMGGFB/UZYdRXak/mlsLJl4RfLz29n2h1oe15Yr8/P/36J1eXFwR5IdkNrk2fx81Pl+nbTDdOwwo7Xle/uhraXYdlwN7F8EypuqhO74Wa46Za1eif2QDe2O5twmzfCGoqDXdHNAV5ud5SPppLlk8lQTrCnhNWty6Y2rjYvd/eGXXG8n92MWeWjS4c0LBPaoyif5H/y0qGPe7hSPF5+9ycasSbo9ZthiSDaJns4rPnVDWl5VW1+G/rQsHq7qJfdhZm+hTdn18/GSvulwzR8jxuZfHdx2Tnyxk6b6LqRD5asErJOVtPHEsZfTu/Kz/OG7Q2/wfMPFoRFWIRFWIRFWIT1fwqL/yYJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABD8BqgWYzRvzLvwAAAAASUVORK5CYII=" style="height:24px;border-radius:4px;margin-right:6px;" alt="BAE">
+  </div>
+</header>
+
+<!-- CONTENT -->
+<div class="content-wrapper">
+
+<!-- LOGIN PAGE -->
+<div class="page active" id="pgLogin">
+  <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80vh; padding:24px;">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
+      <img src="data:image/png;base64,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" style="height:64px;border-radius:10px;" alt="كلية الملك فيصل الجوية">
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAMAAABOo35HAAAAY1BMVEXp5OHqzczrqavtGjvyeYTvVWXuPlLwaXX72t3////85Ob4xsn2r7X97u/60NP1o6r+9/f0lp785OX72tz97e73u7/ziZHyeYP50NP2r7T4xcnwaHT1o6nvVGT3ur/+9vfziJDkJ+jxAAAEJUlEQVR42u3a63abOBiF4TYISRhxagupm8zh/q+ygAT6BMSOuxrWzOr7/LJBQbDR0e2nTwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMB9n5/+AJ9/U1hP2R/gibAIi7AIi7AIi7D+42Eplb+vmP7NFRtlzgnLFotLqcRx7Q/G51KFtL037ar5eB2u0czf7HyqHT+1/nBeTl+KtjS76kPpzBW7Q1n41k3BhM/Lverm4kt2p4YV7ibotkduhmXa9Uw956ur9ZHmp3fyovHAY2HV61tYwzJVLKvPDauI/aiO93c/LN2KU6XIxYZzld5donk8rDbeVwhLV6Lw5Zywvnz9+k08wWR5fP2esPrknBIxDP7hfQO9yFKtfjiswsT7UqK3H3SMDwzrefzwPWlIw+4GfFiN8tKw5vfbNpm6xPHIDy6Vb1hiGKxU1o3Hqn5uxZ1zPp3SuU6EFaoxaVhuHbKSN+KyfKq4Hk4L6zp96JfD5fjlR+xUa1jqcDry99/rTPWxQOn7hm9f8QrtOFo1jdn+9fp37qDlxobWHIU1DpN5OZw1wI9hvXxLbnlqD1kRp7HlUccGMNpGtvQN2w9HA1noTPnSAa0z2Z2w5mpcLkrMrVfX4UMS1lRxp8+eDddmNLX2775nDgdjltuEVYuhKJ7btILQW72qux1W+ofzvc03s3wIp+RgWZ47G9bJiP2avcoAb4Vl2sNJqdpcdpAvpn8wrGHp1J2cDZOK9akta12qTI/5kv1VrIPz7bAy1R6dVdv1SNceJPHOsNQyl+ZvrLNEx/jQsH5cr3//I6qb7+d6vS7zdXzyi510uyF+WUinTesiRix/YVftH+0orLkaa2RYoctVm/JdHAPa02bDV1Fdc9Bfbs2G4xvujFbObhZhdhuWavJ8CIHZx2ZDNSwZJ+XNoMar1rvV38eG9SKqS1aP1d2w3CWMGGFB/UZYdRXak/mlsLJl4RfLz29n2h1oe15Yr8/P/36J1eXFwR5IdkNrk2fx81Pl+nbTDdOwwo7Xle/uhraXYdlwN7F8EypuqhO74Wa46Za1eif2QDe2O5twmzfCGoqDXdHNAV5ud5SPppLlk8lQTrCnhNWty6Y2rjYvd/eGXXG8n92MWeWjS4c0LBPaoyif5H/y0qGPe7hSPF5+9ycasSbo9ZthiSDaJns4rPnVDWl5VW1+G/rQsHq7qJfdhZm+hTdn18/GSvulwzR8jxuZfHdx2Tnyxk6b6LqRD5asErJOVtPHEsZfTu/Kz/OG7Q2/wfMPFoRFWIRFWIRFWIT1fwqL/yYJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABD8BqgWYzRvzLvwAAAAASUVORK5CYII=" style="height:40px;border-radius:6px;" alt="BAE Systems">
+    </div>
+    <h1 style="font-size:24px; font-weight:800; margin-bottom:4px;">نظام جرد المكتبة</h1>
+    <p style="color:var(--text-secondary); margin-bottom:32px; font-size:14px;">كلية الملك فيصل الجوية | KFAA Smart Library</p>
+
+    <div style="width:100%; max-width:360px;">
+      <!-- Team Code Section (first time setup) -->
+      <div id="teamSetupBox" style="display:none; margin-bottom:24px;">
+        <div style="background:var(--warning-light); border-radius:12px; padding:16px; margin-bottom:12px;">
+          <div style="font-weight:700; margin-bottom:8px; font-size:14px;">🔗 إعداد الاتصال</div>
+          <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">اطلب رمز الفريق من المسؤول</p>
+          <input type="text" class="form-input" id="teamCodeInput" placeholder="الصق رمز الفريق هنا..." style="direction:ltr; text-align:center; font-family:monospace; font-size:13px;" />
+          <button class="btn btn-primary" onclick="handleTeamCode()" style="margin-top:8px; width:100%;">تفعيل الرمز</button>
+        </div>
+      </div>
+
+      <div id="loginReadyBox">
+        <div class="form-group">
+          <label style="font-weight:700;">اسم المستخدم</label>
+          <select class="form-input" id="loginUser" style="font-size:16px; padding:14px;">
+            <option value="">— اختر حسابك —</option>
+            <option value="المسؤول">المسؤول (Admin)</option>
+            <option value="محارب">محارب</option>
+            <option value="ابو عمر">ابو عمر</option>
+            <option value="ابو طلال">ابو طلال</option>
+            <option value="تجربه 1">تجربه 1</option>
+            <option value="تجربه 2">تجربه 2</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label style="font-weight:700;">كلمة المرور</label>
+          <input type="password" class="form-input" id="loginPass" placeholder="أدخل كلمة المرور" style="font-size:16px; padding:14px;" onkeydown="if(event.key==='Enter')handleLogin()" />
+        </div>
+        <button class="btn btn-primary" onclick="handleLogin()" style="width:100%; padding:14px; font-size:16px; font-weight:700;" id="loginBtn">تسجيل الدخول</button>
+        <div id="loginError" style="color:var(--error); text-align:center; margin-top:12px; font-size:14px; font-weight:600; display:none;"></div>
+      </div>
+
+      <div style="text-align:center; margin-top:24px;">
+        <button class="btn btn-ghost" onclick="toggleTeamSetup()" id="teamSetupToggle" style="font-size:13px;">🔗 لدي رمز فريق</button>
+      </div>
+    </div>
+
+    <div class="copyright" style="margin-top:auto; padding-top:32px;">© MOHAMMED ALMUTAIRI</div>
+  </div>
+</div>
+
+<!-- HOME PAGE -->
+<div class="page" id="pgHome">
+  <div class="ptr-indicator" id="ptrInd"></div>
+
+  <div class="hero">
+    <div class="hero-title">مرحباً بك 👋</div>
+    <div class="hero-subtitle">جرد المكتبة v5 - إدارة مجموعتك بسهولة</div>
+    <div class="stats-grid">
+      <div class="stat-item">
+        <span class="stat-number" id="statTotal">0</span>
+        <span class="stat-label">إجمالي</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="statFound">0</span>
+        <span class="stat-label">موجود</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="statNotChecked">0</span>
+        <span class="stat-label">غير مفحوص</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="statNotFound">0</span>
+        <span class="stat-label">مفقود</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="search-box">
+    <span class="search-icon">🔍</span>
+    <input type="text" placeholder="ابحث عن كتاب..." id="homeSearch" onclick="nav('search')" />
+  </div>
+
+  <div class="quick-actions">
+    <div class="action-card highlight" onclick="nav('scan')">
+      <span class="action-icon">📷</span>
+      <div class="action-title">مسح الصورة</div>
+      <div class="action-subtitle">كاميرا + الذكاء الاصطناعي</div>
+    </div>
+    <div class="action-card" onclick="nav('add')">
+      <span class="action-icon">➕</span>
+      <div class="action-title">إضافة يدوية</div>
+      <div class="action-subtitle">أدخل البيانات</div>
+    </div>
+    <div class="action-card" onclick="nav('review')">
+      <span class="action-icon">📋</span>
+      <div class="action-title">قائمة المراجعة</div>
+      <div class="action-subtitle">بانتظار التأكيد</div>
+    </div>
+    <div class="action-card" onclick="nav('import')">
+      <span class="action-icon">📥</span>
+      <div class="action-title">استيراد/تصدير</div>
+      <div class="action-subtitle">الملفات</div>
+    </div>
+  </div>
+
+  <div class="btn-row" style="margin-top:12px;">
+    <button class="btn btn-ghost" onclick="nav('allbooks')" style="flex:1;">📚 جميع الكتب</button>
+    <button class="btn btn-ghost" onclick="nav('reports')" style="flex:1;border-color:var(--primary);color:var(--primary);">📊 تقارير</button>
+  </div>
+</div>
+
+<!-- SEARCH PAGE -->
+<div class="page" id="pgSearch">
+  <div class="search-box">
+    <span class="search-icon">🔍</span>
+    <input type="text" placeholder="ابحث عن كتاب..." id="searchInput" onkeyup="doSearch()" autofocus />
+  </div>
+
+  <div class="filter-chips">
+    <button class="chip active" onclick="setSFilter('All')">الكل</button>
+    <button class="chip" onclick="setSFilter('Title')">العنوان</button>
+    <button class="chip" onclick="setSFilter('Author')">المؤلف</button>
+    <button class="chip" onclick="setSFilter('Publisher')">الناشر</button>
+  </div>
+
+  <div id="searchResults"></div>
+</div>
+
+<!-- SCAN PAGE -->
+<div class="page" id="pgScan">
+  <div class="scan-modes" id="scanModes">
+    <div class="scan-mode active" onclick="setScanMode('title')">
+      <span class="scan-mode-icon">📖</span>
+      <div class="scan-mode-name">صفحة العنوان</div>
+    </div>
+    <div class="scan-mode" onclick="setScanMode('copyright')">
+      <span class="scan-mode-icon">©️</span>
+      <div class="scan-mode-name">صفحة الحقوق</div>
+    </div>
+    <div class="scan-mode" onclick="setScanMode('spine')">
+      <span class="scan-mode-icon">📏</span>
+      <div class="scan-mode-name">الظهر</div>
+    </div>
+    <div class="scan-mode" onclick="setScanMode('cover')">
+      <span class="scan-mode-icon">📕</span>
+      <div class="scan-mode-name">الغلاف</div>
+    </div>
+  </div>
+
+  <div class="scan-hint" id="scanHint">💡 صور صفحة العنوان للنتائج الأفضل</div>
+
+  <div class="image-container">
+    <div class="image-placeholder" id="scanPH">
+      <div style="text-align: center; width: 100%;">
+        <div style="font-size: 40px; margin-bottom: 8px;">📸</div>
+        <div style="font-size: 13px; color: #94a3b8;">انقر أدناه لاختيار صورة</div>
+      </div>
+    </div>
+    <img id="prevImg" style="display: none;" />
+  </div>
+
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="$('cameraInput').click()">📷 الكاميرا</button>
+    <button class="btn btn-ghost" onclick="$('fileInput').click()">📁 من الملفات</button>
+  </div>
+
+  <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display: none;" onchange="onImg(event)" />
+  <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="onImg(event)" />
+
+  <div class="loading-container" id="ocrLoad">
+    <div class="spinner"></div>
+    <div class="loading-text" id="ocrProgress">جاري معالجة الصورة...</div>
+    <div class="loading-method hidden" id="aiTag">AI Vision ✨</div>
+  </div>
+
+  <div id="ocrBox" style="display: none;">
+    <div class="card">
+      <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">البيانات المستخرجة:</div>
+      <div class="ocr-field">
+        <div class="ocr-label">العنوان</div>
+        <input type="text" class="form-input" id="ocT" placeholder="العنوان" />
+      </div>
+      <div class="ocr-field">
+        <div class="ocr-label">المؤلف</div>
+        <input type="text" class="form-input" id="ocA" placeholder="المؤلف" />
+      </div>
+      <div class="ocr-field">
+        <div class="ocr-label">الناشر</div>
+        <input type="text" class="form-input" id="ocP" placeholder="الناشر" />
+      </div>
+      <div class="ocr-field">
+        <div class="ocr-label">رقم التصنيف</div>
+        <input type="text" class="form-input" id="ocC" placeholder="رقم التصنيف" />
+      </div>
+      <div class="ocr-field">
+        <div class="ocr-label">ISBN</div>
+        <input type="text" class="form-input" id="ocI" placeholder="ISBN" />
+      </div>
+      <div class="ocr-field">
+        <div class="ocr-label">اللغة</div>
+        <input type="text" class="form-input" id="ocL" placeholder="اللغة" />
+      </div>
+    </div>
+    <div id="ocrRaw" style="font-size: 11px; color: var(--text-secondary); background: var(--bg); padding: 12px; border-radius: 12px; margin-bottom: 14px; min-height: 40px; display: none;"></div>
+    <button class="btn btn-primary" onclick="doMatch()">🔍 ابحث عن تطابقات</button>
+  </div>
+
+  <div id="matchBox" style="display: none;">
+    <div style="font-size: 14px; font-weight: 700; margin-bottom: 12px;">النتائج المقترحة:</div>
+    <div id="matchList"></div>
+  </div>
+</div>
+
+<!-- DETAIL PAGE -->
+<div class="page" id="pgDetail">
+  <div id="bookDet"></div>
+  <div id="bcDisp" style="display: none;"></div>
+</div>
+
+<!-- ADD BOOK PAGE -->
+<div class="page" id="pgAdd">
+  <div class="form-group">
+    <label>العنوان *</label>
+    <input type="text" class="form-input" id="aT" placeholder="العنوان" />
+  </div>
+  <div class="form-group">
+    <label>العنوان الفرعي</label>
+    <input type="text" class="form-input" id="aSt" placeholder="العنوان الفرعي" />
+  </div>
+  <div class="form-group">
+    <label>المؤلف</label>
+    <input type="text" class="form-input" id="aA" placeholder="المؤلف" />
+  </div>
+  <div class="form-group">
+    <label>اللغة</label>
+    <select class="form-input" id="aL">
+      <option value="">اختر اللغة</option>
+      <option value="Arabic">العربية</option>
+      <option value="English">الإنجليزية</option>
+      <option value="French">الفرنسية</option>
+      <option value="Other">أخرى</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>الناشر</label>
+    <input type="text" class="form-input" id="aP" placeholder="الناشر" />
+  </div>
+  <div class="form-group">
+    <label>سنة النشر</label>
+    <input type="number" class="form-input" id="aY" placeholder="YYYY" />
+  </div>
+  <div class="form-group">
+    <label>ISBN</label>
+    <input type="text" class="form-input" id="aI" placeholder="ISBN" />
+  </div>
+  <div class="form-group">
+    <label>التصنيف</label>
+    <select class="form-input" id="aCat">
+      <option value="">اختر التصنيف</option>
+      <option value="أدب">أدب</option>
+      <option value="علوم">علوم</option>
+      <option value="فقه إسلامي">فقه إسلامي</option>
+      <option value="دين إسلامي">دين إسلامي</option>
+      <option value="تاريخ">تاريخ</option>
+      <option value="جغرافيا">جغرافيا</option>
+      <option value="لغة عربية">لغة عربية</option>
+      <option value="تربية">تربية</option>
+      <option value="فلسفة وعلم نفس">فلسفة وعلم نفس</option>
+      <option value="علوم عسكرية">علوم عسكرية</option>
+      <option value="طيران">طيران</option>
+      <option value="هندسة">هندسة</option>
+      <option value="علوم سياسية">علوم سياسية</option>
+      <option value="اقتصاد">اقتصاد</option>
+      <option value="اجتماع">اجتماع</option>
+      <option value="قانون">قانون</option>
+      <option value="فنون">فنون</option>
+      <option value="تراجم وسير">تراجم وسير</option>
+      <option value="مراجع عامة">مراجع عامة</option>
+      <option value="أخرى">أخرى</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>الموقع</label>
+    <input type="text" class="form-input" id="aLoc" placeholder="الموقع" />
+  </div>
+  <div class="form-group">
+    <label>الرف</label>
+    <input type="text" class="form-input" id="aSh" placeholder="الرف" />
+  </div>
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="addBook()">➕ إضافة الكتاب</button>
+    <button class="btn btn-ghost" onclick="goBack()">← رجوع</button>
+  </div>
+</div>
+
+<!-- REVIEW PAGE -->
+<div class="page" id="pgReview">
+  <div id="revList"></div>
+</div>
+
+<!-- ALL BOOKS PAGE -->
+<div class="page" id="pgAllBooks">
+  <div class="filter-chips" id="allBooksFilter">
+    <button class="chip active" onclick="filterAllBooks('all')">الكل</button>
+    <button class="chip" onclick="filterAllBooks('Found')">موجودة</button>
+    <button class="chip" onclick="filterAllBooks('Not Checked')">غير مفحوصة</button>
+    <button class="chip" onclick="filterAllBooks('Not Found')">مفقودة</button>
+  </div>
+  <div class="filter-chips" id="categoryFilter" style="flex-wrap:wrap;"></div>
+  <div id="allBooksCount" style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;"></div>
+  <div id="allList"></div>
+</div>
+
+<!-- IMPORT/EXPORT PAGE -->
+<div class="page" id="pgImport">
+  <div class="form-group">
+    <label>استيراد ملف Excel</label>
+    <input type="file" class="form-input" accept=".xlsx,.xls,.csv" onchange="startImport(event)" />
+  </div>
+  <div class="import-section" id="impBox"></div>
+
+  <!-- TEXT FILE IMPORT (Admin only) -->
+  <div id="textImportSection" style="display:none;">
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px;">📄 استيراد ملف نصي (تنسيق المكتبة)</div>
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">استيراد كتب من ملف نصي بتنسيق cp1256 (مفصول بخطوط)</p>
+      <input type="file" class="form-input" accept=".txt,.text" onchange="handleTextFileImport(event)" />
+      <div id="textImportPreview" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="margin-bottom: 12px;">
+      <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">الخيارات</div>
+      <button class="btn btn-primary btn-small" style="width: auto; margin-bottom: 8px;" onclick="exportBooks()">📤 تصدير Excel</button>
+      <button class="btn btn-error btn-small" style="width: auto;" onclick="clearAll()">🗑️ حذف الكل</button>
+    </div>
+  </div>
+</div>
+
+<!-- REPORTS PAGE -->
+<div class="page" id="pgReports">
+  <div id="reportContent" style="display:flex;flex-direction:column;gap:12px;"></div>
+</div>
+
+<!-- ADMIN PERFORMANCE PAGE -->
+<div class="page" id="pgAdminPerf">
+  <div id="adminPerfContent" style="display:flex;flex-direction:column;gap:12px;"></div>
+</div>
+
+<!-- SETTINGS PAGE -->
+<div class="page" id="pgSettings">
+  <!-- Current User -->
+  <div class="settings-section">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <div>
+        <div style="font-weight:700; font-size:16px;" id="settingsUserName"></div>
+        <div style="font-size:13px; color:var(--text-secondary);" id="settingsUserRole"></div>
+      </div>
+      <button class="btn btn-ghost" onclick="handleLogout()" style="padding:8px 16px; font-size:13px;">🚪 خروج</button>
+    </div>
+  </div>
+
+  <!-- ADMIN-ONLY: API Keys -->
+  <div id="adminSettings" style="display:none;">
+    <div class="settings-section">
+      <div class="settings-title">Supabase</div>
+      <div class="form-group">
+        <label>رابط Supabase</label>
+        <input type="text" class="form-input" id="cfUrl" placeholder="https://xxx.supabase.co" />
+      </div>
+      <div class="form-group">
+        <label>مفتاح API</label>
+        <input type="text" class="form-input" id="cfKey" placeholder="anon key" />
+      </div>
+      <div class="form-group">
+        <label>اسم الجدول</label>
+        <input type="text" class="form-input" id="cfTable" placeholder="books" />
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">OpenAI (الذكاء الاصطناعي)</div>
+      <div class="form-group">
+        <label>مفتاح API</label>
+        <input type="text" class="form-input" id="cfAI" placeholder="sk-..." />
+      </div>
+    </div>
+
+    <button class="btn btn-primary" onclick="testConn()" style="margin-bottom: 16px;">🔌 اختبار الاتصال</button>
+    <div id="cfStatus"></div>
+
+    <!-- Team Code for Admin -->
+    <div class="settings-section" style="margin-top:16px;">
+      <div class="settings-title">🔗 رمز الفريق</div>
+      <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">شارك هذا الرمز مع فريقك ليتمكنوا من الاتصال بقاعدة البيانات</p>
+      <div style="background:var(--bg); border-radius:8px; padding:12px; direction:ltr; text-align:center; font-family:monospace; font-size:11px; word-break:break-all; user-select:all; margin-bottom:8px;" id="teamCodeDisplay">—</div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="genTeamCode()">🔄 إنشاء الرمز</button>
+        <button class="btn btn-ghost" onclick="copyTeamCode()">📋 نسخ</button>
+      </div>
+    </div>
+
+    <div class="btn-group" style="margin-top:16px;">
+      <button class="btn btn-success" onclick="saveCfg()">💾 حفظ الإعدادات</button>
+    </div>
+
+    <!-- ADMIN PERFORMANCE -->
+    <div class="settings-section" style="margin-top:16px;">
+      <div class="settings-title">📊 تقرير أداء المستخدمين</div>
+      <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">عرض سجل نشاطات المستخدمين وأدائهم</p>
+      <button class="btn btn-primary" onclick="nav('adminperf')">👥 عرض أداء المستخدمين والسجل</button>
+    </div>
+
+    <!-- CONFIG DIAGNOSTIC PANEL -->
+    <div class="settings-section" style="margin-top: 20px;">
+      <div class="debug-panel">
+        <div class="debug-header" onclick="toggleDiag()">
+          <span class="debug-title">🔍 تشخيص الإعدادات</span>
+          <span class="debug-icon" id="diagIcon">▼</span>
+        </div>
+        <div class="debug-content" id="diagContent">
+          <div id="diagPanel" style="font-size: 13px; line-height: 1.8; direction: ltr; text-align: left;"></div>
+        </div>
+        <div class="debug-buttons">
+          <button class="btn btn-primary btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="loadDiagnostic()">🔄 تحديث</button>
+          <button class="btn btn-ghost btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="copyDiag()">📋 نسخ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEBUG LOG PANEL -->
+    <div class="settings-section" style="margin-top: 12px;">
+      <div class="debug-panel">
+        <div class="debug-header" onclick="toggleDebug()">
+          <span class="debug-title">🐛 سجل التصحيح</span>
+          <span class="debug-icon">▼</span>
+        </div>
+        <div class="debug-content" id="debugContent">
+          <div id="debugLog"></div>
+        </div>
+        <div class="debug-buttons">
+          <button class="btn btn-primary btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="loadDebugLog()">🔄 تحديث</button>
+          <button class="btn btn-ghost btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="copyDebugLog()">📋 نسخ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NON-ADMIN: Connection Status -->
+  <div id="userSettings" style="display:none;">
+    <div class="settings-section">
+      <div class="settings-title">حالة الاتصال</div>
+      <div id="userConnStatus" style="font-size:14px; line-height:2;"></div>
+    </div>
+  </div>
+
+  <div class="copyright">© MOHAMMED ALMUTAIRI</div>
+</div>
+
+</div>
+
+<!-- BOTTOM NAVIGATION -->
+<nav class="bnav">
+  <button class="bnav-item active" onclick="nav('home')">
+    <span class="bnav-icon">🏠</span>
+    <span class="bnav-label">الرئيسية</span>
+  </button>
+  <button class="bnav-item" onclick="nav('search')">
+    <span class="bnav-icon">🔍</span>
+    <span class="bnav-label">بحث</span>
+  </button>
+  <button class="bnav-item" onclick="nav('scan')">
+    <span class="bnav-icon">📷</span>
+    <span class="bnav-label">مسح</span>
+  </button>
+  <button class="bnav-item" onclick="nav('reports')">
+    <span class="bnav-icon">📊</span>
+    <span class="bnav-label">تقارير</span>
+  </button>
+  <button class="bnav-item" onclick="nav('settings')">
+    <span class="bnav-icon">⚙️</span>
+    <span class="bnav-label">إعدادات</span>
+  </button>
+</nav>
+
+<script src="tesseract/tesseract.min.js"></script>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="app.v5c.js?v=20260408c"></script>
+
+<script>
+// ============ GLOBAL STATE ============
+// CONFIG is declared in app.js — do NOT redeclare here
+let curPage = 'home';
+let scanMode = 'title';
+let importFileRef = null;
+let importAnalysis = null;
+let searchFilter = 'All';
+let debugEntries = [];
+const MAX_DEBUG_ENTRIES = 50;
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+// ============ LOG FUNCTION ============
+function addLog(category, message) {
+  const time = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const entry = { time, category, message };
+  debugEntries.unshift(entry);
+  if (debugEntries.length > MAX_DEBUG_ENTRIES) {
+    debugEntries.pop();
+  }
+  console.log(`[${category}] ${message}`);
+}
+
+// ============ NAVIGATION ============
+function nav(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+
+  const pageMap = {
+    login: 'pgLogin',
+    home: 'pgHome',
+    search: 'pgSearch',
+    scan: 'pgScan',
+    detail: 'pgDetail',
+    add: 'pgAdd',
+    review: 'pgReview',
+    allbooks: 'pgAllBooks',
+    import: 'pgImport',
+    reports: 'pgReports',
+    adminperf: 'pgAdminPerf',
+    settings: 'pgSettings'
+  };
+
+  const targetPageId = pageMap[page];
+  if (targetPageId) {
+    const targetPage = $(targetPageId);
+    if (targetPage) {
+      targetPage.classList.add('active');
+    }
+  }
+
+  curPage = page;
+  updateNav();
+  updateHeader();
+
+  // Load page content
+  if (page === 'home') loadHome();
+  else if (page === 'search') {
+    setTimeout(() => {
+      const si = $('searchInput');
+      if (si) si.focus();
+    }, 100);
+    doSearch();
+  }
+  else if (page === 'review') loadReview();
+  else if (page === 'allbooks') loadAllBooks();
+  else if (page === 'reports') loadReports();
+  else if (page === 'adminperf') loadAdminPerf();
+  else if (page === 'settings') loadCfg();
+  else if (page === 'import') { if (isAdmin()) { $('textImportSection').style.display = 'block'; } else { $('textImportSection').style.display = 'none'; } }
+}
+
+function updateNav() {
+  document.querySelectorAll('.bnav-item').forEach(item => item.classList.remove('active'));
+  let navPage = curPage;
+  if (['detail', 'add', 'review', 'allbooks', 'import', 'adminperf'].includes(curPage)) {
+    navPage = 'home';
+  }
+  const navMap = { home: 0, search: 1, scan: 2, reports: 3, settings: 4 };
+  if (navMap[navPage] !== undefined) {
+    document.querySelectorAll('.bnav-item')[navMap[navPage]].classList.add('active');
+  }
+}
+
+function updateHeader() {
+  const titles = {
+    home: 'جرد المكتبة',
+    search: 'البحث',
+    scan: 'المسح الضوئي',
+    detail: 'تفاصيل الكتاب',
+    add: 'إضافة كتاب',
+    review: 'قائمة المراجعة',
+    allbooks: 'جميع الكتب',
+    import: 'الاستيراد والتصدير',
+    reports: 'التقارير',
+    adminperf: 'أداء المستخدمين',
+    settings: 'الإعدادات'
+  };
+  $('hdrTitle').textContent = titles[curPage] || 'جرد المكتبة';
+
+  if (curPage !== 'home') {
+    $('hdrBack').classList.add('visible');
+  } else {
+    $('hdrBack').classList.remove('visible');
+  }
+}
+
+function goBack() {
+  if (curPage === 'detail') {
+    nav('search');
+  } else {
+    nav('home');
+  }
+}
+
+// ============ HOME PAGE ============
+async function loadHome() {
+  try {
+    const books = await dbAll();
+    const total = books.length;
+    const found = books.filter(b => b.inventory_status === 'Found').length;
+    const notChecked = books.filter(b => b.inventory_status === 'Not Checked').length;
+    const notFound = books.filter(b => b.inventory_status === 'Not Found').length;
+
+    $('statTotal').textContent = total;
+    $('statFound').textContent = found;
+    $('statNotChecked').textContent = notChecked;
+    $('statNotFound').textContent = notFound;
+
+    addLog('Home', `Loaded stats - Total: ${total}, Found: ${found}, NotChecked: ${notChecked}, NotFound: ${notFound}`);
+  } catch (err) {
+    addLog('Error', `Failed to load home: ${err.message}`);
+  }
+}
+
+// ============ SEARCH PAGE ============
+function setSFilter(filter) {
+  searchFilter = filter;
+  document.querySelectorAll('.filter-chips .chip').forEach((chip) => {
+    chip.classList.remove('active');
+  });
+  event.target.classList.add('active');
+  doSearch();
+}
+
+async function doSearch() {
+  const query = $('searchInput').value.trim().toLowerCase();
+  let results = [];
+
+  try {
+    if (query) {
+      const books = await dbAll();
+      results = books.filter(b => {
+        const title = (b.title || '').toLowerCase();
+        const author = (b.author || '').toLowerCase();
+        const publisher = (b.publisher || '').toLowerCase();
+
+        if (searchFilter === 'Title') return title.includes(query);
+        if (searchFilter === 'Author') return author.includes(query);
+        if (searchFilter === 'Publisher') return publisher.includes(query);
+        return title.includes(query) || author.includes(query) || publisher.includes(query);
+      });
+    }
+  } catch (err) {
+    addLog('Error', `Search failed: ${err.message}`);
+  }
+
+  const container = $('searchResults');
+  if (!results.length) {
+    container.innerHTML = query ? '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">لا توجد نتائج</div></div>' : '<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">ابدأ البحث</div></div>';
+    return;
+  }
+
+  container.innerHTML = results.map(b => `
+    <div class="card clickable" onclick="showDet(${b.record_id})">
+      <div class="card-title">${escapeHtml(b.title)}</div>
+      <div class="card-subtitle">${escapeHtml(b.author || '—')}</div>
+      <div class="card-meta">
+        <span>${b.publisher || '—'}</span>
+        <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
+      </div>
+      ${!b.internal_barcode && b.inventory_status !== 'Found' ? `
+        <button class="btn btn-success btn-small" style="margin-top: 10px; width: 100%;" onclick="cfDirect(${b.record_id}); event.stopPropagation();">✅ تأكيد</button>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+// ============ SCAN PAGE ============
+function setScanMode(mode) {
+  scanMode = mode;
+  const modeMap = {
+    title: '💡 صور صفحة العنوان للنتائج الأفضل',
+    copyright: '📄 صورة صفحة الحقوق (ترجمة، سنة النشر)',
+    spine: '📏 صورة ظهر الكتاب',
+    cover: '🎨 صورة غلاف الكتاب'
+  };
+  $('scanHint').textContent = modeMap[mode];
+
+  document.querySelectorAll('.scan-mode').forEach((el) => {
+    el.classList.remove('active');
+  });
+  event.target.closest('.scan-mode').classList.add('active');
+}
+
+function onImg(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    $('prevImg').src = ev.target.result;
+    $('prevImg').style.display = 'block';
+    $('scanPH').style.display = 'none';
+    startAnalysis(ev.target.result);
+    addLog('Scan', `Image selected, starting analysis`);
+  };
+  reader.readAsDataURL(f);
+  e.target.value = '';
+}
+
+async function startAnalysis(imgData) {
+  $('ocrLoad').classList.add('show');
+  $('ocrBox').style.display = 'none';
+  $('matchBox').style.display = 'none';
+
+  let fields = null;
+
+  // Use unified analyzeImage from app.js (tries AI first, then OCR)
+  try {
+    const result = await analyzeImage(imgData, scanMode, (stage, msg) => {
+      $('ocrProgress').textContent = msg;
+      if (stage === 'ai_start') $('aiTag').classList.remove('hidden');
+      if (stage === 'ai_failed' || stage === 'ocr_start') $('aiTag').classList.add('hidden');
+      if (stage === 'ai_success') $('aiTag').classList.remove('hidden');
+    });
+
+    if (result.success && result.fields) {
+      fields = result.fields;
+      if (result.rawText) $('ocrRaw').textContent = result.rawText;
+      else $('ocrRaw').textContent = `[${result.method}] تم الاستخراج بنجاح`;
+      addLog(result.method === 'ai_vision' ? 'AI Vision' : 'OCR', `Extracted: ${fields.title || '(no title)'}`);
+    } else {
+      // Both AI and OCR failed
+      $('ocrLoad').classList.remove('show');
+      $('ocrBox').style.display = 'block';
+      $('ocrRaw').innerHTML = '<span style="color: var(--error);">⚠️ فشل التحليل — ابحث يدوياً</span>';
+      if (result.rawText) $('ocrRaw').textContent = result.rawText + '\n⚠️ لم يتم استخراج بيانات واضحة';
+      // Still populate partial fields if available
+      if (result.fields) fields = result.fields;
+      else { ['ocT', 'ocA', 'ocP', 'ocC', 'ocI'].forEach(id => $(id).value = ''); }
+      showToast('⚠️ فشل التحليل — استخدم البحث اليدوي');
+      addLog('Error', `Analysis failed: ${result.error}`);
+      if (!fields) return;
+    }
+  } catch (err) {
+    $('ocrLoad').classList.remove('show');
+    $('ocrBox').style.display = 'block';
+    $('ocrRaw').innerHTML = `<span style="color: var(--error);">⚠️ خطأ: ${escapeHtml(err.message)}</span>`;
+    ['ocT', 'ocA', 'ocP', 'ocC', 'ocI'].forEach(id => $(id).value = '');
+    showToast('⚠️ خطأ في التحليل');
+    addLog('Error', `Analysis exception: ${err.message}`);
+    return;
+  }
+
+  $('ocrLoad').classList.remove('show');
+  $('ocrBox').style.display = 'block';
+  $('ocT').value = fields.title;
+  $('ocA').value = fields.author;
+  $('ocP').value = fields.publisher;
+  $('ocC').value = fields.callNum;
+  $('ocI').value = fields.isbn;
+  $('ocL').value = fields.language;
+
+  if (!fields.title && !fields.callNum && !fields.isbn) {
+    showToast('⚠️ بيانات ضعيفة — جرّب البحث');
+  }
+}
+
+async function doMatch() {
+  const data = {
+    title: $('ocT').value,
+    author: $('ocA').value,
+    publisher: $('ocP').value,
+    call_number: $('ocC').value,
+    isbn: $('ocI').value,
+    language: $('ocL').value
+  };
+
+  if (!data.title && !data.call_number && !data.isbn) {
+    showToast('أدخل العنوان أو ISBN');
+    return;
+  }
+
+  const matches = await matchBooks(data);
+  $('matchBox').style.display = 'block';
+  const good = matches.filter(m => m.confidence > 5);
+
+  if (!good.length) {
+    $('matchList').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🤷</div>
+        <div class="empty-text">لا توجد تطابقات</div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="nav('search')">🔍 بحث يدوي</button>
+        <button class="btn btn-ghost" onclick="nav('add')">➕ إضافة جديدة</button>
+        <button class="btn btn-warning" onclick="resetScan()">🔄 إعادة</button>
+      </div>
+    `;
+    return;
+  }
+
+  $('matchList').innerHTML = good.map((m, i) => {
+    const confColor = m.confidence >= 70 ? 'var(--success)' : m.confidence >= 40 ? 'var(--warning)' : 'var(--error)';
+    const confClass = m.confidence >= 70 ? 'confidence-90' : m.confidence >= 40 ? 'confidence-50' : 'confidence-below';
+
+    return `
+      <div class="match-card ${i === 0 && m.confidence >= 50 ? 'best' : ''}">
+        ${i === 0 && m.confidence >= 50 ? '<div class="match-badge">أفضل تطابق</div>' : ''}
+        <div class="match-title">${escapeHtml(m.book.title)}</div>
+        ${m.book.subtitle ? `<div class="match-subtitle">${escapeHtml(m.book.subtitle)}</div>` : ''}
+        <div class="match-meta">
+          <span class="match-label">المؤلف:</span>
+          <span>${escapeHtml(m.book.author || '—')}</span>
+        </div>
+        ${m.book.publisher ? `<div class="match-meta"><span class="match-label">الناشر:</span><span>${escapeHtml(m.book.publisher)}</span></div>` : ''}
+        ${m.book.isbn ? `<div class="match-meta"><span class="match-label">ISBN:</span><span style="direction:ltr;font-family:monospace;">${escapeHtml(m.book.isbn)}</span></div>` : ''}
+        ${m.book.full_call_number ? `<div class="match-meta"><span class="match-label">رقم التصنيف:</span><span style="direction:ltr;font-family:monospace;">${escapeHtml(m.book.full_call_number)}</span></div>` : ''}
+        ${m.book.language ? `<div class="match-meta"><span class="match-label">اللغة:</span><span>${escapeHtml(m.book.language)}</span></div>` : ''}
+        ${m.book.location ? `<div class="match-meta"><span class="match-label">الموقع:</span><span>${escapeHtml(m.book.location)}</span></div>` : ''}
+        <div class="match-meta"><span class="match-label">الحالة:</span><span class="badge ${statusBadgeClass(m.book.inventory_status)}" style="font-size:11px;padding:2px 8px;">${statusAr(m.book.inventory_status)}</span></div>
+        <div class="match-meta">
+          <span class="match-label">التطابق:</span>
+          <span style="font-weight: 800; color: ${confColor};">${m.confidence}%</span>
+        </div>
+        <div class="confidence-bar">
+          <div class="confidence-fill ${confClass}" style="width: ${m.confidence}%;"></div>
+        </div>
+        <div class="match-breakdown">
+          <span>العنوان ${m.breakdown.title}%</span>
+          <span>المؤلف ${m.breakdown.author}%</span>
+          ${m.breakdown.isbn ? '<span>ISBN ✅</span>' : ''}
+        </div>
+        <div class="btn-group" style="margin-top: 10px;">
+          <button class="btn btn-success" onclick="cfBook(${m.book.record_id}, ${m.confidence}, 'OCR')">✅ تأكيد</button>
+          <div class="btn-row">
+            <button class="btn btn-warning btn-small" onclick="toReview(${m.book.record_id})">📋 مراجعة</button>
+            <button class="btn btn-ghost btn-small" onclick="resetScan()">🔄 جديد</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('') + '<div class="btn-group"><button class="btn btn-primary" onclick="nav(\'search\')">🔍 بحث يدوي</button></div>';
+
+  $('matchBox').scrollIntoView({ behavior: 'smooth' });
+}
+
+function resetScan() {
+  $('prevImg').style.display = 'none';
+  $('prevImg').src = '';
+  $('scanPH').style.display = 'flex';
+  $('ocrBox').style.display = 'none';
+  $('matchBox').style.display = 'none';
+  $('ocrLoad').classList.remove('show');
+  ['ocT', 'ocA', 'ocP', 'ocC', 'ocI', 'ocL'].forEach(id => $(id).value = '');
+  $('ocrRaw').textContent = '';
+  $('ocrProgress').textContent = '';
+  $('aiTag').classList.add('hidden');
+  $('cameraInput').value = '';
+  $('fileInput').value = '';
+  addLog('Scan', 'Reset all scan state');
+}
+
+// ============ CONFIRM ============
+async function cfBook(id, conf, method) {
+  const b = await confirmBook(id, conf, method);
+  if (!b) return;
+  // --- SYNC FIX: Handle already-inventoried conflict ---
+  if (b.alreadyInventoried) {
+    showToast(`⚠️ تم جرده من قبل: ${b.inventoried_by}`, 4000);
+    // Refresh from cloud to get latest state
+    await pullFromCloud();
+    showDet(id);
+    return;
+  }
+  showToast(`✅ ${b.title} — ${b.internal_barcode}`);
+  setTimeout(fullSync, 500);
+  resetScan();
+  showDet(id);
+}
+
+async function cfDirect(id) {
+  const b = await confirmBook(id, 100, 'Search');
+  if (!b) return;
+  // --- SYNC FIX: Handle already-inventoried conflict ---
+  if (b.alreadyInventoried) {
+    showToast(`⚠️ تم جرده من قبل: ${b.inventoried_by}`, 4000);
+    await pullFromCloud();
+    doSearch();
+    return;
+  }
+  showToast(`✅ ${b.title} — ${b.internal_barcode}`);
+  setTimeout(fullSync, 500);
+  doSearch();
+}
+
+async function toReview(id) {
+  const b = await dbGet(id);
+  if (b) {
+    b.review_status = 'Needs Review';
+    b.notes = (b.notes || '') + ' مراجعة';
+    await dbPut(b);
+    showToast('📋 للمراجعة');
+    addLog('Review', `Marked ${b.title} for review`);
+  }
+}
+
+async function markNF(id) {
+  if (!confirm('هل الكتاب غير موجود؟')) return;
+  const b = await dbGet(id);
+  b.inventory_status = 'Not Found';
+  b.last_inventory_date = new Date().toISOString().split('T')[0];
+  b.review_status = 'Confirmed';
+  await dbPut(b);
+  showToast('✅ تم');
+  setTimeout(fullSync, 500);
+  showDet(id);
+  addLog('Inventory', `Marked ${b.title} as Not Found`);
+}
+
+// ============ DETAIL PAGE ============
+async function showDet(id) {
+  nav('detail');
+  const b = await dbGet(id);
+  if (!b) {
+    $('bookDet').innerHTML = '<div class="empty-state"><div class="empty-text">الكتاب غير موجود</div></div>';
+    return;
+  }
+
+  const fields = [
+    ['العنوان', b.title],
+    ['العنوان الفرعي', b.subtitle],
+    ['المؤلف', b.author],
+    ['التصنيف', b.category || 'أخرى'],
+    ['اللغة', b.language],
+    ['الناشر', b.publisher],
+    ['سنة النشر', b.publication_year],
+    ['ISBN', b.isbn],
+    ['الموقع', b.location],
+    ['الرف', b.shelf],
+    ['رقم التصنيف', b.full_call_number]
+  ].filter(f => f[1]);
+
+  $('bookDet').innerHTML = `
+    <div class="card">
+      <div class="card-title" style="font-size: 18px; margin-bottom: 8px;">${escapeHtml(b.title)}</div>
+      ${b.subtitle ? `<div class="card-subtitle" style="margin-bottom: 12px;">${escapeHtml(b.subtitle)}</div>` : ''}
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0;">
+        <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
+        ${b.internal_barcode ? `<span class="badge" style="font-family: monospace; direction: ltr;">${escapeHtml(b.internal_barcode)}</span>` : ''}
+      </div>
+      <div class="detail-fields">
+        ${fields.map(f => `
+          <div class="detail-field">
+            <div class="detail-label">${f[0]}</div>
+            <div class="detail-value">${escapeHtml(String(f[1]))}</div>
+          </div>
+        `).join('')}
+        ${b.last_inventory_date ? `
+          <div class="detail-field">
+            <div class="detail-label">تاريخ الجرد</div>
+            <div class="detail-value">${b.last_inventory_date}</div>
+          </div>
+        ` : ''}
+        ${b.inventoried_by ? `
+          <div class="detail-field">
+            <div class="detail-label">تم جرده بواسطة</div>
+            <div class="detail-value" style="color: var(--success); font-weight: 600;">${escapeHtml(b.inventoried_by)}</div>
+          </div>
+        ` : ''}
+        ${b.match_method ? `
+          <div class="detail-field">
+            <div class="detail-label">طريقة المطابقة</div>
+            <div class="detail-value">${b.match_method} (${b.match_confidence}%)</div>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+    <div class="btn-group">
+      ${b.internal_barcode ? `<button class="btn btn-primary" onclick="showBC('${escapeHtml(b.internal_barcode)}')">📊 الباركود</button>` : ''}
+      ${b.inventory_status !== 'Found' ? `<button class="btn btn-success" onclick="cfDirect(${b.record_id})">✅ تأكيد</button>` : ''}
+      <button class="btn btn-error" onclick="markNF(${b.record_id})">❌ غير موجود</button>
+      <button class="btn btn-ghost" onclick="goBack()">← رجوع</button>
+    </div>
+  `;
+}
+
+function showBC(code) {
+  $('bookDet').innerHTML = `
+    <div class="card">
+      <div class="barcode-display" style="text-align:center; padding:24px;">
+        <canvas id="bcCanvas" style="max-width:100%; height:auto;"></canvas>
+        <div class="barcode-text" style="font-family:monospace; font-size:18px; font-weight:700; margin-top:12px; letter-spacing:4px;">${escapeHtml(code)}</div>
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" onclick="downloadBarcode()">📥 تحميل الباركود</button>
+      <button class="btn btn-ghost" onclick="goBack()">← رجوع</button>
+    </div>
+  `;
+  drawBarcode('bcCanvas', code);
+}
+
+function drawBarcode(canvasId, text) {
+  // Code128B barcode generator
+  var CODE128B = [
+    [2,1,2,2,2,2],[2,2,2,1,2,2],[2,2,2,2,2,1],[1,2,1,2,2,3],[1,2,1,3,2,2],
+    [1,3,1,2,2,2],[1,2,2,2,1,3],[1,2,2,3,1,2],[1,3,2,2,1,2],[2,2,1,2,1,3],
+    [2,2,1,3,1,2],[2,3,1,2,1,2],[1,1,2,2,3,2],[1,2,2,1,3,2],[1,2,2,2,3,1],
+    [1,1,3,2,2,2],[1,2,3,1,2,2],[1,2,3,2,2,1],[2,2,3,2,1,1],[2,2,1,1,3,2],
+    [2,2,1,2,3,1],[2,1,3,2,1,2],[2,2,3,1,1,2],[3,1,2,1,3,1],[3,1,1,2,2,2],
+    [3,2,1,1,2,2],[3,2,1,2,2,1],[3,1,2,2,1,2],[3,2,2,1,1,2],[3,2,2,2,1,1],
+    [2,1,2,1,2,3],[2,1,2,3,2,1],[2,3,2,1,2,1],[1,1,1,3,2,3],[1,3,1,1,2,3],
+    [1,3,1,3,2,1],[1,1,2,3,1,3],[1,3,2,1,1,3],[1,3,2,3,1,1],[2,1,1,3,1,3],
+    [2,3,1,1,1,3],[2,3,1,3,1,1],[1,1,2,1,3,3],[1,1,2,3,3,1],[1,3,2,1,3,1],
+    [1,1,3,1,2,3],[1,1,3,3,2,1],[1,3,3,1,2,1],[3,1,3,1,2,1],[2,1,1,3,3,1],
+    [2,3,1,1,3,1],[2,1,3,1,1,3],[2,1,3,3,1,1],[2,1,3,1,3,1],[3,1,1,1,2,3],
+    [3,1,1,3,2,1],[3,3,1,1,2,1],[3,1,2,1,1,3],[3,1,2,3,1,1],[3,3,2,1,1,1],
+    [3,1,4,1,1,1],[2,2,1,4,1,1],[4,3,1,1,1,1],[1,1,1,2,2,4],[1,1,1,4,2,2],
+    [1,2,1,1,2,4],[1,2,1,4,2,1],[1,4,1,1,2,2],[1,4,1,2,2,1],[1,1,2,2,1,4],
+    [1,1,2,4,1,2],[1,2,2,1,1,4],[1,2,2,4,1,1],[1,4,2,1,1,2],[1,4,2,2,1,1],
+    [2,4,1,2,1,1],[2,2,1,1,1,4],[4,1,3,1,1,1],[2,4,1,1,1,2],[1,3,4,1,1,1],
+    [1,1,1,2,4,2],[1,2,1,1,4,2],[1,2,1,2,4,1],[1,1,4,2,1,2],[1,2,4,1,1,2],
+    [1,2,4,2,1,1],[4,1,1,2,1,2],[4,2,1,1,1,2],[4,2,1,2,1,1],[2,1,2,1,4,1],
+    [2,1,4,1,2,1],[4,1,2,1,2,1],[1,1,1,1,4,3],[1,1,1,3,4,1],[1,3,1,1,4,1],
+    [1,1,4,1,1,3],[1,1,4,3,1,1],[4,1,1,1,1,3],[4,1,1,3,1,1],[1,1,3,1,4,1],
+    [1,1,4,1,3,1],[3,1,1,1,4,1],[4,1,1,1,3,1],[2,1,1,4,1,2],[2,1,1,2,1,4],
+    [2,1,1,2,3,2],[2,3,3,1,1,1,2]
+  ];
+
+  var STARTB = 104;
+  var STOP = 106;
+
+  var codes = [STARTB];
+  var checksum = STARTB;
+  for (var i = 0; i < text.length; i++) {
+    var val = text.charCodeAt(i) - 32;
+    codes.push(val);
+    checksum += val * (i + 1);
+  }
+  codes.push(checksum % 103);
+  codes.push(STOP);
+
+  // Calculate total width
+  var barWidth = 2;
+  var totalWidth = 20; // quiet zones
+  for (var c = 0; c < codes.length; c++) {
+    var pattern = CODE128B[codes[c]];
+    for (var p = 0; p < pattern.length; p++) totalWidth += pattern[p] * barWidth;
+  }
+
+  var canvas = document.getElementById(canvasId);
+  var height = 120;
+  canvas.width = totalWidth;
+  canvas.height = height + 10;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  var x = 10; // quiet zone
+  for (var c = 0; c < codes.length; c++) {
+    var pattern = CODE128B[codes[c]];
+    for (var p = 0; p < pattern.length; p++) {
+      if (p % 2 === 0) { // even = bar (black)
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x, 0, pattern[p] * barWidth, height);
+      }
+      x += pattern[p] * barWidth;
+    }
+  }
+}
+
+function downloadBarcode() {
+  var canvas = document.getElementById('bcCanvas');
+  if (!canvas) return;
+  var link = document.createElement('a');
+  link.download = 'barcode.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// ============ ADD BOOK PAGE ============
+async function addBook() {
+  const t = $('aT').value.trim();
+  if (!t) {
+    showToast('العنوان مطلوب');
+    return;
+  }
+
+  const b = await dbAdd({
+    title: t,
+    subtitle: $('aSt').value.trim(),
+    author: $('aA').value.trim(),
+    additional_author: '',
+    language: $('aL').value,
+    publisher: $('aP').value.trim(),
+    publication_year: $('aY').value,
+    isbn: $('aI').value.trim(),
+    dewey_number: '',
+    cutter_number: '',
+    full_call_number: '',
+    material_type: 'Book',
+    inventory_status: 'Not Checked',
+    condition: 'Good',
+    location: $('aLoc').value.trim(),
+    shelf: $('aSh').value.trim(),
+    notes: '',
+    internal_barcode: '',
+    category: $('aCat').value || 'أخرى',
+    last_inventory_date: '',
+    match_confidence: '',
+    match_method: '',
+    review_status: 'Pending',
+    cover_image_name: '',
+    added_by: currentUser ? currentUser.name : 'غير معروف',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
+
+  showToast('✅ تم');
+  setTimeout(fullSync, 500);
+  ['aT', 'aSt', 'aA', 'aP', 'aY', 'aI', 'aLoc', 'aSh'].forEach(id => $(id).value = '');
+  $('aL').value = '';
+  $('aCat').value = '';
+  showDet(b.record_id);
+  addLog('Add', `Added new book: ${t}`);
+}
+
+// ============ REVIEW / ALL BOOKS ============
+async function loadReview() {
+  const books = await dbAll();
+  const filtered = books.filter(x => x.review_status === 'Needs Review' || x.review_status === 'Pending' || x.inventory_status === 'Not Checked');
+  renderList(filtered, 'revList');
+}
+
+var allBooksStatusFilter = 'all';
+var allBooksCategoryFilter = 'all';
+
+function filterAllBooks(status) {
+  allBooksStatusFilter = status;
+  document.querySelectorAll('#allBooksFilter .chip').forEach(function(c) { c.classList.remove('active'); });
+  event.target.classList.add('active');
+  loadAllBooks();
+}
+
+function filterByCategory(cat) {
+  allBooksCategoryFilter = cat;
+  document.querySelectorAll('#categoryFilter .chip').forEach(function(c) { c.classList.remove('active'); });
+  event.target.classList.add('active');
+  loadAllBooks();
+}
+
+async function loadAllBooks() {
+  const books = await dbAll();
+  var filtered = books;
+
+  if (allBooksStatusFilter !== 'all') {
+    filtered = filtered.filter(function(b) { return b.inventory_status === allBooksStatusFilter; });
+  }
+  if (allBooksCategoryFilter !== 'all') {
+    filtered = filtered.filter(function(b) { return (b.category || 'أخرى') === allBooksCategoryFilter; });
+  }
+
+  // Build category chips
+  var cats = {};
+  books.forEach(function(b) { var c = b.category || 'أخرى'; cats[c] = (cats[c]||0)+1; });
+  var catEl = $('categoryFilter');
+  if (catEl) {
+    var catHtml = '<button class="chip ' + (allBooksCategoryFilter === 'all' ? 'active' : '') + '" onclick="filterByCategory(\'all\')">كل التصنيفات</button>';
+    Object.keys(cats).sort().forEach(function(c) {
+      catHtml += '<button class="chip ' + (allBooksCategoryFilter === c ? 'active' : '') + '" onclick="filterByCategory(\'' + c + '\')">' + c + ' (' + cats[c] + ')</button>';
+    });
+    catEl.innerHTML = catHtml;
+  }
+
+  var countEl = $('allBooksCount');
+  if (countEl) countEl.textContent = 'عرض ' + filtered.length + ' من ' + books.length + ' كتاب';
+  renderList(filtered, 'allList');
+}
+
+function renderList(books, cid) {
+  const c = $(cid);
+  if (!books.length) {
+    c.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">لا توجد كتب</div></div>';
+    return;
+  }
+
+  c.innerHTML = books.map(b => `
+    <div class="card clickable" onclick="showDet(${b.record_id})" style="padding:16px;">
+      <div class="card-title" style="font-size:16px;font-weight:800;margin-bottom:10px;color:var(--primary);">${escapeHtml(b.title)}</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">المؤلف</span><span style="font-weight:600;">${escapeHtml(b.author || '—')}</span></div>
+        ${b.full_call_number ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم التصنيف</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.full_call_number) + '</span></div>' : ''}
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">التصنيف</span><span style="background:var(--primary-light);color:var(--primary);padding:2px 10px;border-radius:10px;font-size:12px;font-weight:700;">${escapeHtml(b.category || 'أخرى')}</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);">الحالة</span><span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ============ IMPORT/EXPORT ============
+async function startImport(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+
+  importFileRef = f;
+  e.target.value = '';
+
+  const box = $('impBox');
+  box.classList.add('show');
+  box.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">تحليل الملف...</div></div>';
+
+  try {
+    importAnalysis = await analyzeColumns(f);
+    const { headers, sample, autoMap, totalRows } = importAnalysis;
+    const fields = ['title', 'subtitle', 'author', 'language', 'publisher', 'publication_year', 'isbn', 'full_call_number', 'inventory_status', 'location', 'shelf', 'condition', 'notes', 'internal_barcode'];
+    const fieldLabels = {
+      title: 'العنوان *',
+      subtitle: 'العنوان الفرعي',
+      author: 'المؤلف',
+      language: 'اللغة',
+      publisher: 'الناشر',
+      publication_year: 'السنة',
+      isbn: 'ISBN',
+      full_call_number: 'رقم التصنيف',
+      inventory_status: 'حالة الجرد',
+      location: 'الموقع',
+      shelf: 'الرف',
+      condition: 'الحالة',
+      notes: 'ملاحظات',
+      internal_barcode: 'الباركود'
+    };
+
+    let html = `<div class="import-hint">📊 تم العثور على <b>${totalRows}</b> صف و <b>${headers.length}</b> عمود</div>`;
+    html += `<h4 style="margin: 12px 0 8px; font-weight: 700; color: var(--text);">🔗 ربط الأعمدة</h4>`;
+    html += `<table class="import-table"><thead><tr><th>الحقل</th><th>العمود</th></tr></thead><tbody>`;
+
+    for (const fld of fields) {
+      html += `<tr><td>${fieldLabels[fld]}</td><td><select id="map_${fld}"><option value="">— تجاهل —</option>`;
+      for (const h of headers) {
+        const sel = autoMap[fld] === h ? 'selected' : '';
+        html += `<option value="${escapeHtml(h)}" ${sel}>${escapeHtml(h)}</option>`;
+      }
+      html += `</select></td></tr>`;
+    }
+
+    html += `</tbody></table>`;
+    html += `<div style="margin: 12px 0 8px; font-weight: 700; color: var(--text);">📋 عينة من البيانات:</div>`;
+    html += `<div class="sample-data"><table><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>`;
+
+    for (const row of sample) {
+      html += `<tr>${headers.map(h => `<td>${escapeHtml(String(row[h] || ''))}</td>`).join('')}</tr>`;
+    }
+
+    html += `</tbody></table></div>`;
+    html += `<button class="btn btn-success" onclick="execImport()">📥 استيراد ${totalRows} كتاب</button>`;
+
+    box.innerHTML = html;
+  } catch (err) {
+    box.innerHTML = `<div class="import-hint" style="background: var(--error-light); border-color: var(--error); color: #991b1b;">❌ ${escapeHtml(err.message)}</div>`;
+    addLog('Error', `Import analysis failed: ${err.message}`);
+  }
+}
+
+async function execImport() {
+  if (!importFileRef) return;
+
+  const fields = ['title', 'subtitle', 'author', 'language', 'publisher', 'publication_year', 'isbn', 'full_call_number', 'inventory_status', 'location', 'shelf', 'condition', 'notes', 'internal_barcode'];
+  const map = {};
+
+  for (const f of fields) {
+    const sel = $('map_' + f);
+    if (sel && sel.value) map[f] = sel.value;
+    else map[f] = '__NONE__';
+  }
+
+  const box = $('impBox');
+  box.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">جاري الاستيراد...</div></div>';
+
+  try {
+    const { count } = await importFile(importFileRef, map);
+    box.innerHTML = `<div class="import-hint" style="background: var(--success-light); border-color: var(--success); color: #15803d;">✅ تم استيراد <b>${count}</b> كتاب بنجاح!</div>`;
+    showToast(`✅ ${count} كتاب`);
+    importFileRef = null;
+    addLog('Import', `Successfully imported ${count} books`);
+  } catch (err) {
+    box.innerHTML = `<div class="import-hint" style="background: var(--error-light); border-color: var(--error); color: #991b1b;">❌ ${escapeHtml(err.message)}</div>`;
+    addLog('Error', `Import execution failed: ${err.message}`);
+  }
+}
+
+async function exportBooks() {
+  try {
+    const books = await dbAll();
+    const ws = XLSX.utils.json_to_sheet(books);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Books');
+    XLSX.writeFile(wb, 'library-export.xlsx');
+    showToast('✅ تم التصدير');
+    addLog('Export', `Exported ${books.length} books`);
+  } catch (err) {
+    showToast(`❌ ${err.message}`);
+    addLog('Error', `Export failed: ${err.message}`);
+  }
+}
+
+async function clearAll() {
+  const c = await dbCount();
+  if (!confirm(`حذف ${c} كتاب؟`)) return;
+  await dbClear();
+  showToast('✅ تم الحذف');
+  loadHome();
+  addLog('Clear', `Deleted all ${c} books`);
+}
+
+// ============ SETTINGS ============
+function loadCfg() {
+  // Show user info
+  if (currentUser) {
+    $('settingsUserName').textContent = currentUser.name;
+    $('settingsUserRole').textContent = currentUser.isAdmin ? 'مسؤول النظام' : 'مستخدم';
+  }
+
+  if (isAdmin()) {
+    $('adminSettings').style.display = 'block';
+    $('userSettings').style.display = 'none';
+    $('cfUrl').value = CONFIG.supabaseUrl || '';
+    $('cfKey').value = CONFIG.supabaseKey || '';
+    $('cfAI').value = CONFIG.openaiKey || '';
+    $('cfTable').value = CONFIG.tableName || 'books';
+    // Auto-generate team code if config exists
+    var tc = generateTeamCode();
+    if (tc) $('teamCodeDisplay').textContent = tc;
+    loadDebugLog();
+  } else {
+    $('adminSettings').style.display = 'none';
+    $('userSettings').style.display = 'block';
+    // Show connection status for regular users
+    var statusHtml = '';
+    statusHtml += CONFIG.supabaseUrl ? '✅ قاعدة البيانات: متصل<br>' : '❌ قاعدة البيانات: غير متصل<br>';
+    statusHtml += CONFIG.openaiKey ? '✅ الذكاء الاصطناعي: متاح<br>' : '❌ الذكاء الاصطناعي: غير متاح<br>';
+    statusHtml += navigator.onLine ? '✅ الإنترنت: متصل' : '❌ الإنترنت: غير متصل';
+    $('userConnStatus').innerHTML = statusHtml;
+  }
+}
+
+function saveCfg() {
+  if (!isAdmin()) { showToast('⚠️ فقط المسؤول يمكنه تعديل الإعدادات'); return; }
+  CONFIG.supabaseUrl = $('cfUrl').value.trim().replace(/\/$/, '');
+  CONFIG.supabaseKey = $('cfKey').value.trim();
+  CONFIG.openaiKey = $('cfAI').value.trim();
+  CONFIG.tableName = $('cfTable').value.trim() || 'books';
+  saveConfig();
+  // Also save OpenAI key to Supabase for team sharing
+  saveConfigToSupabase();
+  showToast('💾 تم الحفظ');
+  startAutoSync();
+  addLog('Settings', 'Configuration saved by admin');
+  // Update team code display
+  var tc = generateTeamCode();
+  if (tc) $('teamCodeDisplay').textContent = tc;
+}
+
+async function testConn() {
+  const st = $('cfStatus');
+  st.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">جاري الاختبار...</div></div>';
+
+  let msg = '';
+
+  if (CONFIG.supabaseUrl) {
+    try {
+      await supaFetch(`${CONFIG.tableName}?select=count`, { headers: { 'Prefer': 'count=exact' } });
+      msg += '✅ Supabase متصل<br>';
+      addLog('Connection', 'Supabase connected');
+    } catch (e) {
+      msg += `❌ Supabase: ${e.message}<br>`;
+      addLog('Connection', `Supabase failed: ${e.message}`);
+    }
+  } else {
+    msg += '⚪ Supabase غير مُعد<br>';
+  }
+
+  if (CONFIG.openaiKey) {
+    try {
+      const r = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${CONFIG.openaiKey}` }
+      });
+      msg += r.ok ? '✅ OpenAI متصل<br>' : `❌ OpenAI: ${r.status}<br>`;
+      if (r.ok) {
+        addLog('Connection', 'OpenAI connected');
+      } else {
+        addLog('Connection', `OpenAI failed: ${r.status}`);
+      }
+    } catch (e) {
+      msg += `❌ OpenAI: ${e.message}<br>`;
+      addLog('Connection', `OpenAI failed: ${e.message}`);
+    }
+  } else {
+    msg += '⚪ OpenAI غير مُعد<br>';
+  }
+
+  st.innerHTML = `<div class="import-hint">${msg}</div>`;
+}
+
+// ============ CONFIG DIAGNOSTIC ============
+function toggleDiag() {
+  const content = $('diagContent');
+  const icon = $('diagIcon');
+  content.classList.toggle('open');
+  icon.classList.toggle('open');
+  if (content.classList.contains('open')) loadDiagnostic();
+}
+
+function loadDiagnostic() {
+  const panel = $('diagPanel');
+  const diag = typeof getConfigDiagnostic === 'function' ? getConfigDiagnostic() : null;
+  if (!diag) {
+    panel.innerHTML = '<div style="color: var(--error);">getConfigDiagnostic() not available</div>';
+    return;
+  }
+
+  let html = '<div style="font-family: monospace; font-size: 12px;">';
+  html += '<div style="margin-bottom: 8px; font-weight: 700; color: var(--primary);">Config Status:</div>';
+  html += `<div>${diag.current.supabaseUrl}</div>`;
+  html += `<div>${diag.current.supabaseKey}</div>`;
+  html += `<div>${diag.current.openaiKey}</div>`;
+  html += `<div>Table: ${diag.current.tableName}</div>`;
+  html += '<hr style="margin: 8px 0; border-color: var(--border);">';
+  html += `<div>Source: <b>${diag.source}</b> ${diag.restored ? '(restored from backup)' : ''}</div>`;
+  html += `<div>localStorage[lib_config]: ${diag.localStorage.lib_config ? '✅' : '❌'}</div>`;
+  html += `<div>localStorage[lib_config_backup]: ${diag.localStorage.lib_config_backup ? '✅' : '❌'}</div>`;
+  html += '<hr style="margin: 8px 0; border-color: var(--border);">';
+  html += '<div style="font-weight: 700;">Load Attempts:</div>';
+  for (const a of diag.attempts) {
+    html += `<div style="padding: 2px 0;">${a}</div>`;
+  }
+  html += '</div>';
+  panel.innerHTML = html;
+}
+
+function copyDiag() {
+  const diag = typeof getConfigDiagnostic === 'function' ? getConfigDiagnostic() : {};
+  const text = JSON.stringify(diag, null, 2);
+  navigator.clipboard.writeText(text).then(() => showToast('📋 تم نسخ التشخيص'));
+}
+
+// ============ DEBUG LOG ============
+function toggleDebug() {
+  const content = $('debugContent');
+  const icon = content.previousElementSibling.querySelector('.debug-icon');
+  content.classList.toggle('open');
+  icon.classList.toggle('open');
+}
+
+function loadDebugLog() {
+  const log = $('debugLog');
+  // Merge local debugEntries + app.js DEBUG_LOG
+  const allEntries = [...debugEntries];
+  if (typeof DEBUG_LOG !== 'undefined') {
+    for (const e of DEBUG_LOG) {
+      allEntries.push({ time: e.time.split('T')[1].split('.')[0], category: e.cat, message: e.msg });
+    }
+  }
+  // Sort by time descending
+  allEntries.sort((a, b) => b.time > a.time ? 1 : -1);
+
+  log.innerHTML = allEntries.map(entry => `
+    <div class="debug-entry ${entry.category === 'Error' || entry.category === 'ERROR' ? 'error' : entry.category === 'Warning' ? 'warning' : ''}">
+      <span class="debug-time">${entry.time}</span>
+      <span class="debug-category">${entry.category}</span>
+      <div class="debug-message">${escapeHtml(entry.message)}</div>
+    </div>
+  `).join('');
+
+  if (!allEntries.length) {
+    log.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">لا توجد سجلات</div>';
+  }
+}
+
+function copyDebugLog() {
+  let text = debugEntries.map(e => `[${e.time}] [${e.category}] ${e.message}`).join('\n');
+  if (typeof getDebugLog === 'function') {
+    text += '\n--- app.js log ---\n' + getDebugLog();
+  }
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('📋 تم النسخ');
+  });
+}
+
+// ============ UTILITIES ============
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+// showToast and statusAr are defined in app.js — do NOT redeclare here
+
+function statusBadgeClass(status) {
+  const map = {
+    'Found': 'badge-online',
+    'Not Found': 'badge-sync-error',
+    'Not Checked': 'badge-syncing',
+    'Confirmed': 'badge-synced',
+    'Pending': 'badge-offline'
+  };
+  return map[status] || 'badge-offline';
+}
+
+// ============ CONNECTIVITY ============
+// setSyncStatus is defined in app.js — do NOT redeclare here
+
+function updConn() {
+  if (!CONFIG.supabaseUrl) {
+    setSyncStatus('offline');
+    $('connBadge').textContent = '⚪ غير مُعد';
+    return;
+  }
+
+  if (navigator.onLine) {
+    $('connBadge').textContent = '🟢 متصل';
+    $('connBadge').className = 'badge badge-online';
+    fullSync();
+  } else {
+    $('connBadge').textContent = '🔴 منقطع';
+    $('connBadge').className = 'badge badge-offline';
+    setSyncStatus('offline');
+  }
+}
+
+window.addEventListener('online', () => {
+  showToast('🟢 متصل — جاري التزامن...');
+  updConn();
+});
+
+window.addEventListener('offline', () => {
+  showToast('📴 بدون إنترنت — الوضع المحلي');
+  setSyncStatus('offline');
+});
+
+// ============ PULL TO REFRESH ============
+let touchStart = 0;
+let pulling = false;
+
+document.addEventListener('touchstart', e => {
+  if (window.scrollY === 0 && curPage === 'home') {
+    touchStart = e.touches[0].clientY;
+    pulling = true;
+  }
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+  if (pulling) {
+    const d = e.touches[0].clientY - touchStart;
+    const ptr = $('ptrInd');
+    if (d > 60) {
+      ptr.classList.add('show');
+      ptr.textContent = '↓ أفلت للتحديث';
+    } else if (d > 0) {
+      ptr.classList.add('show');
+      ptr.textContent = '↓ اسحب للتحديث';
+    }
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+  if (pulling && $('ptrInd').classList.contains('show')) {
+    const d = (e.changedTouches[0]?.clientY || 0) - touchStart;
+    if (d > 60) {
+      $('ptrInd').textContent = '🔄 جاري التحديث...';
+      fullSync().finally(() => {
+        loadHome();
+        $('ptrInd').classList.remove('show');
+      });
+    } else {
+      $('ptrInd').classList.remove('show');
+    }
+  }
+  pulling = false;
+});
+
+// ============ LOGIN HANDLERS ============
+async function handleLogin() {
+  var username = $('loginUser').value;
+  var password = $('loginPass').value;
+  var errEl = $('loginError');
+
+  if (!username) { errEl.textContent = 'اختر حسابك'; errEl.style.display = 'block'; return; }
+  if (!password) { errEl.textContent = 'أدخل كلمة المرور'; errEl.style.display = 'block'; return; }
+
+  $('loginBtn').textContent = 'جاري الدخول...';
+  $('loginBtn').disabled = true;
+
+  var result = await doLogin(username, password);
+
+  if (result.success) {
+    errEl.style.display = 'none';
+    $('loginPass').value = '';
+    showMainApp();
+    addLog('Auth', 'Login: ' + username);
+  } else {
+    errEl.textContent = result.error;
+    errEl.style.display = 'block';
+    $('loginBtn').textContent = 'تسجيل الدخول';
+    $('loginBtn').disabled = false;
+  }
+}
+
+function handleLogout() {
+  doLogout();
+  hideMainApp();
+  showToast('تم تسجيل الخروج');
+}
+
+function showMainApp() {
+  $('pgLogin').classList.remove('active');
+  document.querySelector('.bnav').style.display = 'flex';
+  document.querySelector('.hdr').style.display = '';
+  nav('home');
+
+  // Always try to load OpenAI key from Supabase (for ALL users — admin and non-admin)
+  if (CONFIG.supabaseUrl) {
+    loadConfigFromSupabase().then(function(loaded) {
+      if (loaded) {
+        addLog('Config', 'OpenAI key loaded/refreshed from cloud');
+        _saveConfigToAllStores();
+      }
+      updConn();
+      // Start auto-sync + realtime after config is ready
+      startAutoSync();
+    });
+  } else {
+    updConn();
+    // Start auto-sync + realtime immediately (if config exists)
+    startAutoSync();
+  }
+}
+
+function hideMainApp() {
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+  $('pgLogin').classList.add('active');
+  document.querySelector('.bnav').style.display = 'none';
+  document.querySelector('.hdr').style.display = 'none';
+  $('loginBtn').textContent = 'تسجيل الدخول';
+  $('loginBtn').disabled = false;
+}
+
+function toggleTeamSetup() {
+  var box = $('teamSetupBox');
+  if (box.style.display === 'none') {
+    box.style.display = 'block';
+    $('teamSetupToggle').textContent = '✕ إغلاق';
+  } else {
+    box.style.display = 'none';
+    $('teamSetupToggle').textContent = '🔗 لدي رمز فريق';
+  }
+}
+
+function handleTeamCode() {
+  var code = $('teamCodeInput').value;
+  if (!code.trim()) { showToast('الصق الرمز أولاً'); return; }
+  var result = applyTeamCode(code);
+  if (result.success) {
+    showToast('✅ تم تفعيل الاتصال');
+    $('teamSetupBox').style.display = 'none';
+    $('teamSetupToggle').textContent = '✅ متصل';
+    $('teamSetupToggle').disabled = true;
+    // Load OpenAI key from Supabase and start sync after team code is applied
+    loadConfigFromSupabase().then(function(loaded) {
+      if (loaded) {
+        addLog('Config', 'OpenAI key loaded from cloud after team code');
+        _saveConfigToAllStores();
+      }
+      startAutoSync();
+    });
+  } else {
+    showToast('❌ ' + result.error);
+  }
+}
+
+function genTeamCode() {
+  var tc = generateTeamCode();
+  if (tc) {
+    $('teamCodeDisplay').textContent = tc;
+    showToast('✅ تم إنشاء الرمز');
+  } else {
+    showToast('⚠️ أعد Supabase أولاً ثم احفظ');
+  }
+}
+
+function copyTeamCode() {
+  var tc = $('teamCodeDisplay').textContent;
+  if (tc && tc !== '—') {
+    navigator.clipboard.writeText(tc).then(function() { showToast('📋 تم نسخ الرمز'); });
+  }
+}
+
+// ============ REPORTS ============
+async function loadReports() {
+  var books = await dbAll();
+  var total = books.length;
+  var found = books.filter(function(b) { return b.inventory_status === 'Found'; }).length;
+  var notChecked = books.filter(function(b) { return b.inventory_status === 'Not Checked'; }).length;
+  var notFound = books.filter(function(b) { return b.inventory_status === 'Not Found'; }).length;
+
+  // Category stats
+  var cats = {};
+  books.forEach(function(b) { var c = b.category || 'أخرى'; cats[c] = (cats[c]||0)+1; });
+  var sortedCats = Object.entries(cats).sort(function(a,b) { return b[1]-a[1]; });
+
+  // Author stats
+  var authors = {};
+  books.forEach(function(b) { if(b.author) { var a = b.author.split(',')[0].trim(); if(a.length > 1) authors[a] = (authors[a]||0)+1; }});
+  var topAuthors = Object.entries(authors).sort(function(a,b) { return b[1]-a[1]; }).slice(0,10);
+
+  // Year stats
+  var years = {};
+  books.forEach(function(b) {
+    var y = String(b.publication_year||'').match(/\d{4}/);
+    if(y) years[y[0]] = (years[y[0]]||0)+1;
+  });
+  var sortedYears = Object.entries(years).sort(function(a,b) { return a[0]-b[0]; });
+
+  var foundPct = total ? Math.round(found/total*100) : 0;
+  var notCheckedPct = total ? Math.round(notChecked/total*100) : 0;
+  var notFoundPct = total ? Math.round(notFound/total*100) : 0;
+
+  var html = '';
+
+  // Summary cards
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:8px;">';
+  html += '<div class="card" style="text-align:center;background:var(--primary);color:#fff;"><div style="font-size:28px;font-weight:800;">' + total + '</div><div style="font-size:12px;opacity:0.9;">إجمالي الكتب</div></div>';
+  html += '<div class="card" style="text-align:center;background:var(--success);color:#fff;"><div style="font-size:28px;font-weight:800;">' + foundPct + '%</div><div style="font-size:12px;opacity:0.9;">نسبة الجرد</div></div>';
+  html += '</div>';
+
+  // Status breakdown
+  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">حالة الجرد</div>';
+  html += '<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;"><span>موجود</span><span style="font-weight:700;color:var(--success);">' + found + ' (' + foundPct + '%)</span></div><div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + foundPct + '%;background:var(--success);border-radius:4px;"></div></div></div>';
+  html += '<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;"><span>غير مفحوص</span><span style="font-weight:700;color:var(--warning);">' + notChecked + ' (' + notCheckedPct + '%)</span></div><div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + notCheckedPct + '%;background:var(--warning);border-radius:4px;"></div></div></div>';
+  html += '<div><div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;"><span>مفقود</span><span style="font-weight:700;color:var(--error);">' + notFound + ' (' + notFoundPct + '%)</span></div><div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + notFoundPct + '%;background:var(--error);border-radius:4px;"></div></div></div>';
+  html += '</div>';
+
+  // Category breakdown
+  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">التصنيفات</div>';
+  sortedCats.forEach(function(c) {
+    var pct = Math.round(c[1]/total*100);
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>' + c[0] + '</span><div style="display:flex;align-items:center;gap:8px;"><div style="width:60px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:var(--primary);border-radius:3px;"></div></div><span style="font-weight:700;min-width:40px;text-align:left;">' + c[1] + '</span></div></div>';
+  });
+  html += '</div>';
+
+  // Top authors
+  if (topAuthors.length > 0) {
+    html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">أكثر المؤلفين</div>';
+    topAuthors.forEach(function(a, i) {
+      html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>' + (i+1) + '. ' + escapeHtml(a[0]) + '</span><span style="font-weight:700;color:var(--primary);">' + a[1] + '</span></div>';
+    });
+    html += '</div>';
+  }
+
+  // Publication years
+  if (sortedYears.length > 0) {
+    var maxYear = Math.max.apply(null, sortedYears.map(function(y) { return y[1]; }));
+    html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">توزيع سنوات النشر</div>';
+    sortedYears.forEach(function(y) {
+      var pct = Math.round(y[1]/maxYear*100);
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;"><span style="min-width:40px;direction:ltr;">' + y[0] + '</span><div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:var(--primary);border-radius:3px;"></div></div><span style="font-weight:700;min-width:24px;">' + y[1] + '</span></div>';
+    });
+    html += '</div>';
+  }
+
+  $('reportContent').innerHTML = html;
+}
+
+// ============ ADMIN PERFORMANCE ============
+async function loadAdminPerf() {
+  if (!isAdmin()) { $('adminPerfContent').innerHTML = '<div class="empty-state"><div class="empty-text">متاح للمسؤول فقط</div></div>'; return; }
+
+  var loginLog = typeof getLoginLog === 'function' ? getLoginLog() : [];
+  var activityLog = typeof getActivityLog === 'function' ? getActivityLog() : [];
+  var books = await dbAll();
+
+  var loginCounts = {};
+  loginLog.forEach(function(e) { loginCounts[e.user] = (loginCounts[e.user]||0)+1; });
+
+  var invCounts = {};
+  books.forEach(function(b) { if(b.inventoried_by) invCounts[b.inventoried_by] = (invCounts[b.inventoried_by]||0)+1; });
+
+  var addCounts = {};
+  activityLog.filter(function(a) { return a.action === 'إضافة كتاب'; }).forEach(function(a) { addCounts[a.user] = (addCounts[a.user]||0)+1; });
+
+  var html = '';
+
+  // User performance table
+  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">أداء المستخدمين</div>';
+  html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
+  html += '<tr style="background:var(--bg);"><th style="padding:10px;text-align:right;border-bottom:2px solid var(--border);">المستخدم</th><th style="padding:10px;text-align:center;border-bottom:2px solid var(--border);">دخول</th><th style="padding:10px;text-align:center;border-bottom:2px solid var(--border);">جرد</th><th style="padding:10px;text-align:center;border-bottom:2px solid var(--border);">إضافة</th></tr>';
+
+  var allUsers = {};
+  Object.keys(loginCounts).forEach(function(u) { allUsers[u] = true; });
+  Object.keys(invCounts).forEach(function(u) { allUsers[u] = true; });
+  Object.keys(addCounts).forEach(function(u) { allUsers[u] = true; });
+
+  Object.keys(allUsers).forEach(function(u) {
+    html += '<tr><td style="padding:10px;border-bottom:1px solid var(--border);font-weight:600;">' + escapeHtml(u) + '</td>';
+    html += '<td style="padding:10px;text-align:center;border-bottom:1px solid var(--border);">' + (loginCounts[u]||0) + '</td>';
+    html += '<td style="padding:10px;text-align:center;border-bottom:1px solid var(--border);color:var(--success);font-weight:700;">' + (invCounts[u]||0) + '</td>';
+    html += '<td style="padding:10px;text-align:center;border-bottom:1px solid var(--border);color:var(--primary);font-weight:700;">' + (addCounts[u]||0) + '</td></tr>';
+  });
+  if (Object.keys(allUsers).length === 0) {
+    html += '<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--text-secondary);">لا توجد بيانات بعد</td></tr>';
+  }
+  html += '</table></div></div>';
+
+  // Activity log
+  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">سجل النشاطات</div>';
+  html += '<div style="max-height:400px;overflow-y:auto;">';
+  activityLog.slice(0, 100).forEach(function(a) {
+    var time = new Date(a.timestamp);
+    var timeStr = time.toLocaleDateString('ar-SA') + ' ' + time.toLocaleTimeString('ar-SA', {hour:'2-digit',minute:'2-digit'});
+    html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;">';
+    html += '<div><span style="font-weight:700;color:var(--primary);">' + escapeHtml(a.user) + '</span> — ' + escapeHtml(a.action);
+    if (a.details) html += ' <span style="color:var(--text-secondary);">(' + escapeHtml(a.details) + ')</span>';
+    html += '</div>';
+    html += '<span style="color:var(--text-secondary);white-space:nowrap;margin-right:8px;">' + timeStr + '</span>';
+    html += '</div>';
+  });
+  if (!activityLog.length) html += '<div style="text-align:center;color:var(--text-secondary);padding:20px;">لا توجد نشاطات مسجلة بعد</div>';
+  html += '</div></div>';
+
+  $('adminPerfContent').innerHTML = html;
+}
+
+// ============ TEXT FILE IMPORT ============
+function handleTextFileImport(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var buffer = ev.target.result;
+    var text;
+    try {
+      var decoder = new TextDecoder('windows-1256');
+      text = decoder.decode(buffer);
+    } catch(err) {
+      text = new TextDecoder('utf-8').decode(buffer);
+    }
+
+    var books = typeof parseLibraryTextFile === 'function' ? parseLibraryTextFile(text) : [];
+    if (!books.length) {
+      showToast('⚠️ لم يتم العثور على كتب في الملف');
+      return;
+    }
+
+    var previewHtml = '<div class="import-hint" style="background:var(--success-light);border-color:var(--success);color:#15803d;">📚 تم استخراج <b>' + books.length + '</b> كتاب من الملف</div>';
+    previewHtml += '<div style="max-height:300px;overflow-y:auto;margin-bottom:12px;">';
+    books.slice(0, 20).forEach(function(b, i) {
+      previewHtml += '<div class="card" style="padding:10px;margin-bottom:6px;"><div style="font-weight:700;font-size:13px;">' + (i+1) + '. ' + escapeHtml(b.title) + '</div>';
+      previewHtml += '<div style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(b.author || '—') + ' | ' + escapeHtml(b.category) + '</div></div>';
+    });
+    if (books.length > 20) previewHtml += '<div style="text-align:center;color:var(--text-secondary);font-size:13px;padding:8px;">... و ' + (books.length - 20) + ' كتاب آخر</div>';
+    previewHtml += '</div>';
+    previewHtml += '<button class="btn btn-success" onclick="execTextImport()">📥 استيراد ' + books.length + ' كتاب</button>';
+
+    $('textImportPreview').innerHTML = previewHtml;
+    window._pendingTextBooks = books;
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function execTextImport() {
+  var books = window._pendingTextBooks;
+  if (!books || !books.length) return;
+
+  $('textImportPreview').innerHTML = '<div style="text-align:center;padding:20px;"><div class="spinner" style="margin:0 auto;margin-bottom:10px;"></div><div class="loading-text">جاري الاستيراد...</div></div>';
+
+  var count = 0;
+  for (var i = 0; i < books.length; i++) {
+    var b = books[i];
+    await dbAdd({
+      title: b.title || '', subtitle: '', author: b.author || '', additional_author: '',
+      language: 'Arabic', publisher: b.publisher || '', publication_year: b.publication_year || '',
+      isbn: '', dewey_number: b.dewey_number || '', cutter_number: '',
+      full_call_number: b.full_call_number || '', material_type: 'Book',
+      inventory_status: 'Not Checked', condition: 'Good', location: '', shelf: '',
+      notes: '', internal_barcode: '', subject: b.subject || '', category: b.category || 'أخرى',
+      last_inventory_date: '', match_confidence: '', match_method: '',
+      review_status: 'Pending', cover_image_name: '',
+      added_by: currentUser ? currentUser.name : 'admin',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    });
+    count++;
+  }
+
+  $('textImportPreview').innerHTML = '<div class="import-hint" style="background:var(--success-light);border-color:var(--success);color:#15803d;">✅ تم استيراد <b>' + count + '</b> كتاب بنجاح!</div>';
+  showToast('✅ تم استيراد ' + count + ' كتاب');
+  window._pendingTextBooks = null;
+  setTimeout(fullSync, 500);
+}
+
+// ============ SERVICE WORKER ============
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(e => {
+    console.log('SW registration failed:', e);
+    addLog('ServiceWorker', `Registration failed: ${e.message}`);
+  });
+}
+
+// ============ INIT ============
+async function initApp() {
+  addLog('App', 'Initializing v5c with Auth...');
+
+  // Step 1: Load config from localStorage
+  loadConfig();
+
+  try {
+    // Step 2: Open IndexedDB
+    await openDB();
+
+    // Step 3: Try to restore config from IndexedDB
+    await loadConfigFromIDB();
+
+    // Step 4: Backup config
+    if (CONFIG.supabaseUrl || CONFIG.openaiKey) {
+      _saveConfigToAllStores();
+    }
+
+    // Step 5: Check for existing session
+    if (restoreSession()) {
+      showMainApp();
+    } else {
+      hideMainApp();
+      // Check if Supabase is configured — if not, show team code hint for non-first-time
+      if (!CONFIG.supabaseUrl) {
+        // No config at all — maybe show team code section
+      }
+    }
+
+    addLog('App', 'Library v5c Ready | Auth: ' + (currentUser ? currentUser.name : 'not logged in'));
+  } catch(err) {
+    addLog('Error', 'Failed to initialize: ' + err.message);
+    hideMainApp(); // Show login at least
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
+</script>
+
+</body>
+</html>
