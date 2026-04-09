@@ -2643,6 +2643,7 @@ async function handleLogin() {
   $('loginBtn').disabled = true;
 
   try {
+    try {
     var result = await doLogin(username, password);
 
     if (result.success) {
