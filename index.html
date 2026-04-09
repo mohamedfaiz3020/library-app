@@ -1777,11 +1777,14 @@ async function doSearch() {
         const title = (b.title || '').toLowerCase();
         const author = (b.author || '').toLowerCase();
         const publisher = (b.publisher || '').toLowerCase();
+        const bib = (b.bib || '').toLowerCase();
+        const doctype = (b.doctype || '').toLowerCase();
+        const subjects = (b.subjects || '').toLowerCase();
 
         if (searchFilter === 'Title') return title.includes(query);
         if (searchFilter === 'Author') return author.includes(query);
         if (searchFilter === 'Publisher') return publisher.includes(query);
-        return title.includes(query) || author.includes(query) || publisher.includes(query);
+        return title.includes(query) || author.includes(query) || publisher.includes(query) || bib.includes(query) || doctype.includes(query) || subjects.includes(query);
       });
     }
   } catch (err) {
@@ -1800,8 +1803,10 @@ async function doSearch() {
       <div class="card-subtitle">${escapeHtml(b.author || '—')}</div>
       <div class="card-meta">
         <span>${b.publisher || '—'}</span>
+        ${b.bib ? '<span style="font-size:11px;color:var(--text-secondary);">bib: ' + escapeHtml(b.bib) + '</span>' : ''}
         <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
       </div>
+      ${b.doctype ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">التصنيف: ' + escapeHtml(b.doctype) + '</div>' : ''}
       ${!b.internal_barcode && b.inventory_status !== 'Found' ? `
         <button class="btn btn-success btn-small" style="margin-top: 10px; width: 100%;" onclick="cfDirect(${b.record_id}); event.stopPropagation();">✅ تأكيد</button>
       ` : ''}
@@ -2065,14 +2070,24 @@ async function showDet(id) {
     ['العنوان', b.title],
     ['العنوان الفرعي', b.subtitle],
     ['المؤلف', b.author],
-    ['التصنيف', b.category || 'أخرى'],
-    ['اللغة', b.language],
+    ['رقم السجل (bib)', b.bib],
+    ['رقم التصنيف', b.doctype || b.full_call_number],
+    ['التصنيف', b.category || b.library_source || 'أخرى'],
+    ['اللغة', b.language || b.lang],
     ['الناشر', b.publisher],
-    ['سنة النشر', b.publication_year],
+    ['مكان النشر', b.pubplace],
+    ['تاريخ النشر', b.pubdate || b.publication_year],
+    ['الموضوعات', b.subjects],
+    ['الطبعة', b.edition],
+    ['رقم ديوي', b.diwi],
+    ['الوصف المادي', b.descriptions],
+    ['العدد', b.issue],
+    ['الصفحات', b.pages],
+    ['المصدر', b.library_source],
     ['ISBN', b.isbn],
     ['الموقع', b.location],
     ['الرف', b.shelf],
-    ['رقم التصنيف', b.full_call_number]
+    ['ملاحظات', b.notes || b.note505]
   ].filter(f => f[1]);
 
   $('bookDet').innerHTML = `
@@ -2324,8 +2339,10 @@ function renderList(books, cid) {
       <div class="card-title" style="font-size:16px;font-weight:800;margin-bottom:10px;color:var(--primary);">${escapeHtml(b.title)}</div>
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
         <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">المؤلف</span><span style="font-weight:600;">${escapeHtml(b.author || '—')}</span></div>
-        ${b.full_call_number ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم التصنيف</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.full_call_number) + '</span></div>' : ''}
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">التصنيف</span><span style="background:var(--primary-light);color:var(--primary);padding:2px 10px;border-radius:10px;font-size:12px;font-weight:700;">${escapeHtml(b.category || 'أخرى')}</span></div>
+        ${b.bib ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم السجل</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.bib) + '</span></div>' : ''}
+        ${b.doctype ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم التصنيف</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.doctype) + '</span></div>' : (b.full_call_number ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم التصنيف</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.full_call_number) + '</span></div>' : '')}
+        ${b.publisher ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">الناشر</span><span style="font-weight:600;">' + escapeHtml(b.publisher) + '</span></div>' : ''}
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">التصنيف</span><span style="background:var(--primary-light);color:var(--primary);padding:2px 10px;border-radius:10px;font-size:12px;font-weight:700;">${escapeHtml(b.category || b.library_source || 'أخرى')}</span></div>
         <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);">الحالة</span><span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span></div>
       </div>
     </div>
@@ -2347,7 +2364,7 @@ async function startImport(e) {
   try {
     importAnalysis = await analyzeColumns(f);
     const { headers, sample, autoMap, totalRows } = importAnalysis;
-    const fields = ['title', 'subtitle', 'author', 'language', 'publisher', 'publication_year', 'isbn', 'full_call_number', 'inventory_status', 'location', 'shelf', 'condition', 'notes', 'internal_barcode'];
+    const fields = ['title', 'subtitle', 'author', 'language', 'publisher', 'publication_year', 'isbn', 'full_call_number', 'inventory_status', 'location', 'shelf', 'condition', 'notes', 'internal_barcode', 'bib', 'doctype', 'subjects', 'diwi', 'pubdate', 'pubplace', 'edition', 'descriptions', 'library_source'];
     const fieldLabels = {
       title: 'العنوان *',
       subtitle: 'العنوان الفرعي',
@@ -2362,7 +2379,16 @@ async function startImport(e) {
       shelf: 'الرف',
       condition: 'الحالة',
       notes: 'ملاحظات',
-      internal_barcode: 'الباركود'
+      internal_barcode: 'الباركود',
+      bib: 'رقم السجل (bib)',
+      doctype: 'رقم التصنيف (doctype)',
+      subjects: 'الموضوعات',
+      diwi: 'رقم ديوي',
+      pubdate: 'تاريخ النشر',
+      pubplace: 'مكان النشر',
+      edition: 'الطبعة',
+      descriptions: 'الوصف المادي',
+      library_source: 'المصدر (KFAA/KFAAL)'
     };
 
     let html = `<div class="import-hint">📊 تم العثور على <b>${totalRows}</b> صف و <b>${headers.length}</b> عمود</div>`;
