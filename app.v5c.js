@@ -215,29 +215,6 @@ function loadConfig() {
     }
   }
 
-  // Step 1.5: Try sessionStorage as backup (Fix 1)
-  if (!found) {
-    try {
-      const raw = sessionStorage.getItem('lib_config_session');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.supabaseUrl || parsed.supabaseKey || parsed.openaiKey) {
-          Object.assign(CONFIG, parsed);
-          CONFIG_DIAG.source = 'sessionStorage';
-          CONFIG_DIAG.attempts.push(`✅ Found config in sessionStorage["lib_config_session"]`);
-          found = true;
-          debugLog('CONFIG', `Loaded from sessionStorage["lib_config_session"]`);
-        } else {
-          CONFIG_DIAG.attempts.push(`⚪ sessionStorage key exists but empty config`);
-        }
-      } else {
-        CONFIG_DIAG.attempts.push(`⚪ sessionStorage key not found`);
-      }
-    } catch(e) {
-      CONFIG_DIAG.attempts.push(`❌ sessionStorage parse error: ${e.message}`);
-    }
-  }
-
   // Step 2: Try IndexedDB config store (backup)
   if (!found) {
     CONFIG_DIAG.attempts.push('🔄 Trying IndexedDB config backup...');
@@ -300,12 +277,6 @@ async function loadConfigFromIDB() {
     CONFIG_DIAG.attempts.push(`❌ IndexedDB restore error: ${e.message}`);
     debugLog('ERROR', 'IDB config restore failed', e.message);
   }
-
-  // Fix 3: After loading from IDB, always try loadConfigFromSupabase to get the latest OpenAI key
-  if (CONFIG.supabaseUrl && CONFIG.supabaseKey) {
-    debugLog('CONFIG', 'Attempting to load OpenAI key from Supabase...');
-    await loadConfigFromSupabase();
-  }
 }
 
 function saveConfig() {
@@ -331,11 +302,6 @@ function _saveConfigToAllStores() {
   try {
     localStorage.setItem('lib_config_backup', JSON.stringify(data));
   } catch(e) {}
-
-  // Save to sessionStorage as additional backup (Fix 1)
-  try {
-    sessionStorage.setItem('lib_config_session', JSON.stringify(data));
-  } catch(e) { debugLog('ERROR', 'Failed saving to sessionStorage', e.message); }
 
   // Save to IndexedDB config store (if DB is open)
   if (db) {
@@ -448,12 +414,6 @@ function queueSync(action, book) {
     debugLog('SYNC', `Queued ${action} for book ${book.title || 'unknown'}`);
   } catch(e) {
     debugLog('ERROR', 'Failed to queue sync', e.message);
-  }
-
-  // Fix 6: Auto-flush sync queue when online
-  if (navigator.onLine && CONFIG.supabaseUrl) {
-    clearTimeout(window._syncFlushTimer);
-    window._syncFlushTimer = setTimeout(function() { pushToCloud(); }, 500);
   }
 }
 
@@ -741,24 +701,15 @@ function startRealtimeSync() {
     realtimeWs.onmessage = function(evt) {
       try {
         var msg = JSON.parse(evt.data);
-        // Fix 2: Supabase sends postgres_changes events with payload.data containing the change
-        var isChange = false;
-        if (msg.event === 'postgres_changes') isChange = true;
-        if (msg.event === 'INSERT' || msg.event === 'UPDATE' || msg.event === 'DELETE') isChange = true;
-        if (msg.payload && msg.payload.type === 'INSERT') isChange = true;
-        if (msg.payload && msg.payload.type === 'UPDATE') isChange = true;
-        if (msg.payload && msg.payload.type === 'DELETE') isChange = true;
-        // Also check for the data wrapper format
-        if (msg.payload && msg.payload.data && msg.payload.data.type) isChange = true;
-
-        if (isChange) {
-          debugLog('REALTIME', 'Change detected: ' + (msg.event || msg.payload?.type || 'unknown'));
-          // Pull latest data and refresh UI
-          setTimeout(function() {
-            pullFromCloud().then(function() {
-              if (typeof loadHome === 'function') loadHome();
-            });
-          }, 500);
+        if (msg.event === 'postgres_changes' || msg.event === 'INSERT' || msg.event === 'UPDATE' || msg.event === 'DELETE') {
+          debugLog('REALTIME', 'Change detected: ' + msg.event, msg.payload);
+          // Pull latest data from cloud immediately
+          setTimeout(function() { pullFromCloud(); }, 300);
+        }
+        // Also handle the wrapped payload format
+        if (msg.payload && msg.payload.type && (msg.payload.type === 'INSERT' || msg.payload.type === 'UPDATE' || msg.payload.type === 'DELETE')) {
+          debugLog('REALTIME', 'DB change: ' + msg.payload.type);
+          setTimeout(function() { pullFromCloud(); }, 300);
         }
       } catch(e) {}
     };
@@ -936,12 +887,6 @@ async function confirmBook(id, confidence, method) {
   if (!book.internal_barcode) book.internal_barcode = await generateBarcode();
   await dbPut(book);
   debugLog('MATCH', `Confirmed book ${book.title} with ${method} method by ${book.inventoried_by}`);
-
-  // Fix 5: Push immediately to propagate change to other users
-  if (CONFIG.supabaseUrl && navigator.onLine) {
-    setTimeout(function() { pushToCloud(); }, 100);
-  }
-
   return book;
 }
 
@@ -968,12 +913,17 @@ async function importFile(file, columnMap) {
         let count = 0;
         for (const r of rows) {
           const book = {
+            bib: r[map.bib] || '', doctype: r[map.doctype] || '',
             title: r[map.title] || '', subtitle: r[map.subtitle] || '',
             author: r[map.author] || '', additional_author: r[map.additional_author] || '',
             language: r[map.language] || '', publisher: r[map.publisher] || '',
-            publication_year: r[map.publication_year] || '', isbn: r[map.isbn] || '',
-            dewey_number: r[map.dewey_number] || '', cutter_number: r[map.cutter_number] || '',
+            publication_year: r[map.publication_year] || '', pubdate: r[map.pubdate] || '',
+            pubplace: r[map.pubplace] || '', isbn: r[map.isbn] || '',
+            dewey_number: r[map.dewey_number] || '', diwi: r[map.diwi] || '',
+            cutter_number: r[map.cutter_number] || '',
             full_call_number: r[map.full_call_number] || '',
+            subjects: r[map.subjects] || '', edition: r[map.edition] || '',
+            descriptions: r[map.descriptions] || '',
             material_type: r[map.material_type] || 'Book',
             inventory_status: r[map.inventory_status] || 'Not Checked',
             condition: r[map.condition] || 'Good',
@@ -982,6 +932,7 @@ async function importFile(file, columnMap) {
             last_inventory_date: r[map.last_inventory_date] || '',
             match_confidence: '', match_method: '',
             review_status: r[map.review_status] || 'Pending',
+            source_db: r[map.source_db] || '',
             cover_image_name: '', created_at: new Date().toISOString()
           };
           if (book.title) { await dbAdd(book); count++; }
@@ -1004,26 +955,35 @@ async function importFile(file, columnMap) {
 function autoDetectColumns(headers) {
   const map = {};
   const patterns = {
+    bib: [/^bib$/i, /رقم.?المكتبة/i],
+    doctype: [/^doctype$/i, /نوع.?الوثيقة/i, /رقم.?التصنيف/i],
     title: [/^title$/i, /عنوان/i, /^name$/i, /book.?title/i, /العنوان/],
     subtitle: [/subtitle/i, /عنوان.?فرعي/i, /sub.?title/i],
     author: [/^author$/i, /مؤلف/i, /writer/i, /المؤلف/],
     additional_author: [/additional.?author/i, /co.?author/i],
-    language: [/^lang/i, /language/i, /اللغة/i, /لغة/i],
-    publisher: [/publish/i, /ناشر/i, /الناشر/i, /press/i, /دار/i],
-    publication_year: [/year/i, /سنة/i, /date/i, /pub.*year/i],
+    language: [/^lang$/i, /language/i, /اللغة/i, /لغة/i],
+    publisher: [/^publisher$/i, /ناشر/i, /الناشر/i, /press/i, /دار/i],
+    publication_year: [/year/i, /سنة/i, /pub.*year/i],
+    pubdate: [/^pubdate$/i, /تاريخ.?النشر/i],
+    pubplace: [/^pubplace$/i, /مكان.?النشر/i],
     isbn: [/isbn/i],
     dewey_number: [/dewey/i, /ديوي/i],
+    diwi: [/^diwi$/i, /ديوي/i],
     cutter_number: [/cutter/i],
     full_call_number: [/call.?num/i, /رقم.?التصنيف/i, /classification/i],
-    material_type: [/material/i, /type/i, /نوع/i],
-    inventory_status: [/inventory.?status/i, /status/i, /حالة/i],
+    subjects: [/^subjects$/i, /موضوع/i, /المواضيع/i, /التصنيف/i],
+    edition: [/^edition$/i, /الطبعة/i, /طبعة/i],
+    descriptions: [/^descriptions$/i, /الوصف/i, /وصف/i],
+    material_type: [/material/i, /^type$/i, /نوع/i],
+    inventory_status: [/inventory.?status/i, /^status$/i, /حالة/i],
     condition: [/condition/i, /حالة.?المادة/i],
     location: [/location/i, /موقع/i, /المكان/i],
     shelf: [/shelf/i, /رف/i],
-    notes: [/note/i, /ملاحظ/i],
+    notes: [/^notes$/i, /ملاحظ/i],
     internal_barcode: [/barcode/i, /باركود/i],
     last_inventory_date: [/inventory.?date/i, /تاريخ.?الجرد/i],
-    review_status: [/review/i, /مراجعة/i]
+    review_status: [/review/i, /مراجعة/i],
+    source_db: [/^source_db$/i, /^source$/i, /المصدر/i]
   };
 
   for (const [field, pats] of Object.entries(patterns)) {
@@ -1437,192 +1397,3 @@ function esc(s) {
   d.textContent=s;
   return d.innerHTML;
 }
-
-// ============ CATEGORY CLASSIFICATION ============
-var BOOK_CATEGORIES = [
-  'أدب', 'علوم', 'فقه إسلامي', 'تاريخ', 'جغرافيا', 'لغة عربية',
-  'تربية', 'فلسفة وعلم نفس', 'علوم عسكرية', 'طيران', 'هندسة',
-  'علوم سياسية', 'اقتصاد', 'دين إسلامي', 'اجتماع', 'قانون',
-  'فنون', 'تراجم وسير', 'مراجع عامة', 'أخرى'
-];
-
-function classifyByDewey(dewey, subject) {
-  if (!dewey && !subject) return 'أخرى';
-  var d = parseFloat(dewey) || 0;
-  var subj = (subject || '').toLowerCase();
-
-  // Dewey-based classification
-  if (d >= 0 && d < 100) return 'مراجع عامة';
-  if (d >= 100 && d < 200) return 'فلسفة وعلم نفس';
-  if (d >= 200 && d < 300) {
-    if (subj.includes('فقه') || subj.includes('احكام')) return 'فقه إسلامي';
-    return 'دين إسلامي';
-  }
-  if (d >= 300 && d < 320) return 'اجتماع';
-  if (d >= 320 && d < 330) return 'علوم سياسية';
-  if (d >= 330 && d < 340) return 'اقتصاد';
-  if (d >= 340 && d < 350) return 'قانون';
-  if (d >= 350 && d < 360) {
-    if (subj.includes('عسكري') || subj.includes('حرب') || subj.includes('جيش')) return 'علوم عسكرية';
-    return 'علوم عسكرية';
-  }
-  if (d >= 370 && d < 380) return 'تربية';
-  if (d >= 380 && d < 400) return 'اجتماع';
-  if (d >= 400 && d < 500) return 'لغة عربية';
-  if (d >= 500 && d < 600) return 'علوم';
-  if (d >= 600 && d < 620) return 'هندسة';
-  if (d >= 620 && d < 630) {
-    if (subj.includes('طيران') || subj.includes('طائر')) return 'طيران';
-    return 'هندسة';
-  }
-  if (d >= 630 && d < 700) return 'هندسة';
-  if (d >= 700 && d < 800) return 'فنون';
-  if (d >= 800 && d < 900) return 'أدب';
-  if (d >= 910 && d < 920) return 'جغرافيا';
-  if (d >= 920 && d < 930) return 'تراجم وسير';
-  if (d >= 900 && d < 1000) return 'تاريخ';
-
-  // Subject-based fallback
-  if (subj.includes('عسكري') || subj.includes('حرب')) return 'علوم عسكرية';
-  if (subj.includes('طيران')) return 'طيران';
-  if (subj.includes('تراجم') || subj.includes('سير')) return 'تراجم وسير';
-  if (subj.includes('أدب') || subj.includes('شعر') || subj.includes('رواي')) return 'أدب';
-  if (subj.includes('فقه')) return 'فقه إسلامي';
-  if (subj.includes('إسلام') || subj.includes('قرآن') || subj.includes('حديث')) return 'دين إسلامي';
-
-  return 'أخرى';
-}
-
-function categoryAr(cat) {
-  return cat || 'أخرى';
-}
-
-// ============ ACTIVITY LOG ============
-var ACTIVITY_LOG_KEY = 'lib_activity_log';
-var LOGIN_LOG_KEY = 'lib_login_log';
-
-function logActivity(action, details) {
-  try {
-    var log = JSON.parse(localStorage.getItem(ACTIVITY_LOG_KEY) || '[]');
-    log.unshift({
-      user: currentUser ? currentUser.name : 'غير معروف',
-      action: action,
-      details: details || '',
-      timestamp: new Date().toISOString()
-    });
-    if (log.length > 500) log = log.slice(0, 500);
-    localStorage.setItem(ACTIVITY_LOG_KEY, JSON.stringify(log));
-  } catch(e) {}
-}
-
-function logLogin(username) {
-  try {
-    var log = JSON.parse(localStorage.getItem(LOGIN_LOG_KEY) || '[]');
-    log.unshift({
-      user: username,
-      timestamp: new Date().toISOString()
-    });
-    if (log.length > 500) log = log.slice(0, 500);
-    localStorage.setItem(LOGIN_LOG_KEY, JSON.stringify(log));
-  } catch(e) {}
-}
-
-function getActivityLog() {
-  try { return JSON.parse(localStorage.getItem(ACTIVITY_LOG_KEY) || '[]'); } catch(e) { return []; }
-}
-
-function getLoginLog() {
-  try { return JSON.parse(localStorage.getItem(LOGIN_LOG_KEY) || '[]'); } catch(e) { return []; }
-}
-
-// ============ TEXT FILE IMPORT (cp1256 format) ============
-function parseLibraryTextFile(text) {
-  var blocks = text.split(/\-{10,}/);
-  var books = [];
-  for (var i = 0; i < blocks.length; i++) {
-    var block = blocks[i].trim();
-    if (!block || block.length < 20) continue;
-
-    var lines = block.split('\n');
-    var book = { title: '', author: '', publisher: '', publication_year: '', dewey_number: '', full_call_number: '', subject: '', category: '' };
-
-    // First meaningful line often has call number
-    var firstLine = '';
-    for (var j = 0; j < lines.length; j++) {
-      var l = lines[j].trim();
-      if (l && !l.startsWith('مراجع')) { firstLine = l; break; }
-      if (l.startsWith('مراجع')) {
-        // Extract dewey from first non-empty line after 'مراجع'
-        var parts = l.split(/\s+/);
-        // Look for next line with dewey
-      }
-    }
-
-    // Extract Dewey number (pattern like "230.92 ز ع ا")
-    var deweyMatch = block.match(/(\d{3}(?:\.\d+)?)\s+[^\n]*\n/);
-    if (deweyMatch) {
-      book.dewey_number = deweyMatch[1];
-      book.full_call_number = deweyMatch[0].trim();
-    }
-
-    // Extract fields
-    var currentField = '';
-    for (var j = 0; j < lines.length; j++) {
-      var line = lines[j];
-      if (/العنوان/.test(line)) {
-        book.title = line.replace(/.*العنوان\s*/, '').trim();
-        currentField = 'title';
-      } else if (/المؤلف/.test(line)) {
-        book.author = line.replace(/.*المؤلف\s*/, '').trim();
-        currentField = 'author';
-      } else if (/بيانات النشر/.test(line)) {
-        var pubData = line.replace(/.*بيانات النشر\s*/, '').trim();
-        book.publisher = pubData;
-        var yearMatch = pubData.match(/(\d{4})/);
-        if (yearMatch) book.publication_year = yearMatch[1];
-        currentField = 'publisher';
-      } else if (/الموضوع/.test(line)) {
-        book.subject = line.replace(/.*الموضوع\s*/, '').trim();
-        currentField = 'subject';
-      } else if (currentField === 'subject' && line.trim() && !line.match(/^\s{0,5}\S/)) {
-        // Continuation of subject
-        book.subject += ' -- ' + line.trim();
-      }
-    }
-
-    if (book.title) {
-      book.category = classifyByDewey(book.dewey_number, book.subject);
-      books.push(book);
-    }
-  }
-  return books;
-}
-
-// Override doLogin to log logins
-var _originalDoLogin = doLogin;
-doLogin = async function(username, password) {
-  var result = await _originalDoLogin(username, password);
-  if (result.success) {
-    logLogin(username);
-    logActivity('تسجيل دخول', username);
-  }
-  return result;
-};
-
-// Override confirmBook to log activity
-var _originalConfirmBook = confirmBook;
-confirmBook = async function(id, confidence, method) {
-  var result = await _originalConfirmBook(id, confidence, method);
-  if (result && !result.alreadyInventoried) {
-    logActivity('جرد كتاب', result.title || '');
-  }
-  return result;
-};
-
-// Override dbAdd to log activity
-var _originalDbAdd = dbAdd;
-dbAdd = async function(book) {
-  var result = await _originalDbAdd(book);
-  logActivity('إضافة كتاب', book.title || '');
-  return result;
-};
