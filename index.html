@@ -1049,7 +1049,7 @@ select.form-input {
   height: calc(56px + var(--sb));
   background: var(--card);
   border-top: 1px solid var(--border);
-  display: flex;
+  display: none;
   z-index: 99;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(10px);
@@ -2642,15 +2642,23 @@ async function handleLogin() {
   $('loginBtn').textContent = 'جاري الدخول...';
   $('loginBtn').disabled = true;
 
-  var result = await doLogin(username, password);
+  try {
+    var result = await doLogin(username, password);
 
-  if (result.success) {
-    errEl.style.display = 'none';
-    $('loginPass').value = '';
-    showMainApp();
-    addLog('Auth', 'Login: ' + username);
-  } else {
-    errEl.textContent = result.error;
+    if (result.success) {
+      errEl.style.display = 'none';
+      $('loginPass').value = '';
+      showMainApp();
+      addLog('Auth', 'Login: ' + username);
+    } else {
+      errEl.textContent = result.error;
+      errEl.style.display = 'block';
+      $('loginBtn').textContent = 'تسجيل الدخول';
+      $('loginBtn').disabled = false;
+    }
+  } catch (e) {
+    console.error('Login error:', e);
+    errEl.textContent = 'خطأ في تسجيل الدخول، حاول مرة أخرى';
     errEl.style.display = 'block';
     $('loginBtn').textContent = 'تسجيل الدخول';
     $('loginBtn').disabled = false;
@@ -2665,6 +2673,8 @@ function handleLogout() {
 
 function showMainApp() {
   $('pgLogin').classList.remove('active');
+  $('loginBtn').textContent = 'تسجيل الدخول';
+  $('loginBtn').disabled = false;
   document.querySelector('.bnav').style.display = 'flex';
   document.querySelector('.hdr').style.display = '';
   nav('home');
