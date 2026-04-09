@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="جرد المكتبة">
 <meta name="theme-color" content="#0f172a">
 <title>جرد المكتبة v5</title>
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="manifest.json">
 <style>:root {
   --primary: #1e3a5f;
   --primary-dark: #0f2440;
@@ -1565,9 +1565,9 @@ select.form-input {
   </button>
 </nav>
 
-<script src="/tesseract/tesseract.min.js"></script>
-<script src="/lib/xlsx.full.min.js"></script>
-<script src="/app.v5c.js?v=20260408b"></script>
+<script src="tesseract/tesseract.min.js"></script>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="app.v5c.js?v=20260408b"></script>
 
 <script>
 // ============ GLOBAL STATE ============
@@ -2776,7 +2776,7 @@ function copyTeamCode() {
 
 // ============ SERVICE WORKER ============
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(e => {
+  navigator.serviceWorker.register('sw.js').catch(e => {
     console.log('SW registration failed:', e);
     addLog('ServiceWorker', `Registration failed: ${e.message}`);
   });
