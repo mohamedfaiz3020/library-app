@@ -8,15 +8,14 @@
 <meta name="apple-mobile-web-app-title" content="جرد المكتبة">
 <meta name="theme-color" content="#0f172a">
 <title>جرد المكتبة v5</title>
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="/manifest.json">
 <style>
 :root {
-  --primary: #1a365d;
-  --primary-dark: #0f2440;
-  --primary-light: #e8eef6;
-  --success: #2d7a3a;
-  --success-light: #e6f4ea;
-  --accent-red: #e11931;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #dbeafe;
+  --success: #16a34a;
+  --success-light: #dcfce7;
   --warning: #d97706;
   --warning-light: #fef3c7;
   --error: #dc2626;
@@ -56,7 +55,7 @@ body {
 
 /* HEADER */
 .hdr {
-  background: linear-gradient(135deg, #0f2440 0%, #1a365d 100%);
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   color: #ffffff;
   padding: calc(var(--st) + 10px) 16px 12px;
   position: fixed;
@@ -246,7 +245,7 @@ body {
 
 /* HERO SECTION */
 .hero {
-  background: linear-gradient(135deg, #1a365d 0%, #2d7a3a 100%);
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
   color: #ffffff;
   border-radius: var(--radius);
   padding: 24px;
@@ -1135,8 +1134,9 @@ select.form-input {
 <!-- LOGIN PAGE -->
 <div class="page active" id="pgLogin">
   <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80vh; padding:24px;">
+    <div style="font-size:64px; margin-bottom:16px;">📚</div>
     <h1 style="font-size:24px; font-weight:800; margin-bottom:4px;">نظام جرد المكتبة</h1>
-    <p style="color:var(--text-secondary); margin-bottom:32px; font-size:14px;">نظام جرد المكتبة الذكي | Smart Library</p>
+    <p style="color:var(--text-secondary); margin-bottom:32px; font-size:14px;">KFAA Smart Library</p>
 
     <div style="width:100%; max-width:360px;">
       <!-- Team Code Section (first time setup) -->
@@ -1234,10 +1234,7 @@ select.form-input {
     </div>
   </div>
 
-  <div class="btn-row" style="margin-top:12px;">
-    <button class="btn btn-ghost" onclick="nav('allbooks')" style="flex:1;">📚 جميع الكتب</button>
-    <button class="btn btn-ghost" onclick="nav('reports')" style="flex:1;border-color:var(--primary);color:var(--primary);">📊 تقارير</button>
-  </div>
+  <button class="btn btn-ghost" onclick="nav('allbooks')">📚 جميع الكتب</button>
 </div>
 
 <!-- SEARCH PAGE -->
@@ -1385,32 +1382,6 @@ select.form-input {
     <input type="text" class="form-input" id="aI" placeholder="ISBN" />
   </div>
   <div class="form-group">
-    <label>التصنيف</label>
-    <select class="form-input" id="aCat">
-      <option value="">اختر التصنيف</option>
-      <option value="أدب">أدب</option>
-      <option value="علوم">علوم</option>
-      <option value="فقه إسلامي">فقه إسلامي</option>
-      <option value="دين إسلامي">دين إسلامي</option>
-      <option value="تاريخ">تاريخ</option>
-      <option value="جغرافيا">جغرافيا</option>
-      <option value="لغة عربية">لغة عربية</option>
-      <option value="تربية">تربية</option>
-      <option value="فلسفة وعلم نفس">فلسفة وعلم نفس</option>
-      <option value="علوم عسكرية">علوم عسكرية</option>
-      <option value="طيران">طيران</option>
-      <option value="هندسة">هندسة</option>
-      <option value="علوم سياسية">علوم سياسية</option>
-      <option value="اقتصاد">اقتصاد</option>
-      <option value="اجتماع">اجتماع</option>
-      <option value="قانون">قانون</option>
-      <option value="فنون">فنون</option>
-      <option value="تراجم وسير">تراجم وسير</option>
-      <option value="مراجع عامة">مراجع عامة</option>
-      <option value="أخرى">أخرى</option>
-    </select>
-  </div>
-  <div class="form-group">
     <label>الموقع</label>
     <input type="text" class="form-input" id="aLoc" placeholder="الموقع" />
   </div>
@@ -1431,14 +1402,6 @@ select.form-input {
 
 <!-- ALL BOOKS PAGE -->
 <div class="page" id="pgAllBooks">
-  <div class="filter-chips" id="allBooksFilter">
-    <button class="chip active" onclick="filterAllBooks('all')">الكل</button>
-    <button class="chip" onclick="filterAllBooks('Found')">موجودة</button>
-    <button class="chip" onclick="filterAllBooks('Not Checked')">غير مفحوصة</button>
-    <button class="chip" onclick="filterAllBooks('Not Found')">مفقودة</button>
-  </div>
-  <div class="filter-chips" id="categoryFilter" style="flex-wrap:wrap;"></div>
-  <div id="allBooksCount" style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;"></div>
   <div id="allList"></div>
 </div>
 
@@ -1450,16 +1413,6 @@ select.form-input {
   </div>
   <div class="import-section" id="impBox"></div>
 
-  <!-- TEXT FILE IMPORT (Admin only) -->
-  <div id="textImportSection" style="display:none;">
-    <div class="card" style="margin-bottom:12px;">
-      <div style="font-size:14px;font-weight:700;margin-bottom:8px;">📄 استيراد ملف نصي (تنسيق المكتبة)</div>
-      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">استيراد كتب من ملف نصي بتنسيق cp1256 (مفصول بخطوط)</p>
-      <input type="file" class="form-input" accept=".txt,.text" onchange="handleTextFileImport(event)" />
-      <div id="textImportPreview" style="margin-top:12px;"></div>
-    </div>
-  </div>
-
   <div class="card">
     <div style="margin-bottom: 12px;">
       <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">الخيارات</div>
@@ -1467,16 +1420,6 @@ select.form-input {
       <button class="btn btn-error btn-small" style="width: auto;" onclick="clearAll()">🗑️ حذف الكل</button>
     </div>
   </div>
-</div>
-
-<!-- REPORTS PAGE -->
-<div class="page" id="pgReports">
-  <div id="reportContent" style="display:flex;flex-direction:column;gap:12px;"></div>
-</div>
-
-<!-- ADMIN PERFORMANCE PAGE -->
-<div class="page" id="pgAdminPerf">
-  <div id="adminPerfContent" style="display:flex;flex-direction:column;gap:12px;"></div>
 </div>
 
 <!-- SETTINGS PAGE -->
@@ -1534,13 +1477,6 @@ select.form-input {
 
     <div class="btn-group" style="margin-top:16px;">
       <button class="btn btn-success" onclick="saveCfg()">💾 حفظ الإعدادات</button>
-    </div>
-
-    <!-- ADMIN PERFORMANCE -->
-    <div class="settings-section" style="margin-top:16px;">
-      <div class="settings-title">📊 تقرير أداء المستخدمين</div>
-      <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">عرض سجل نشاطات المستخدمين وأدائهم</p>
-      <button class="btn btn-primary" onclick="nav('adminperf')">👥 عرض أداء المستخدمين والسجل</button>
     </div>
 
     <!-- CONFIG DIAGNOSTIC PANEL -->
@@ -1605,19 +1541,15 @@ select.form-input {
     <span class="bnav-icon">📷</span>
     <span class="bnav-label">مسح</span>
   </button>
-  <button class="bnav-item" onclick="nav('reports')">
-    <span class="bnav-icon">📊</span>
-    <span class="bnav-label">تقارير</span>
-  </button>
   <button class="bnav-item" onclick="nav('settings')">
     <span class="bnav-icon">⚙️</span>
     <span class="bnav-label">إعدادات</span>
   </button>
 </nav>
 
-<script src="tesseract/tesseract.min.js"></script>
-<script src="lib/xlsx.full.min.js"></script>
-<script src="app.v5c.js?v=20260408c"></script>
+<script src="/tesseract/tesseract.min.js"></script>
+<script src="/lib/xlsx.full.min.js"></script>
+<script src="/app.v5c.js?v=20260408b"></script>
 
 <script>
 // ============ GLOBAL STATE ============
@@ -1659,8 +1591,6 @@ function nav(page) {
     review: 'pgReview',
     allbooks: 'pgAllBooks',
     import: 'pgImport',
-    reports: 'pgReports',
-    adminperf: 'pgAdminPerf',
     settings: 'pgSettings'
   };
 
@@ -1687,19 +1617,16 @@ function nav(page) {
   }
   else if (page === 'review') loadReview();
   else if (page === 'allbooks') loadAllBooks();
-  else if (page === 'reports') loadReports();
-  else if (page === 'adminperf') loadAdminPerf();
   else if (page === 'settings') loadCfg();
-  else if (page === 'import') { if (isAdmin()) { $('textImportSection').style.display = 'block'; } else { $('textImportSection').style.display = 'none'; } }
 }
 
 function updateNav() {
   document.querySelectorAll('.bnav-item').forEach(item => item.classList.remove('active'));
   let navPage = curPage;
-  if (['detail', 'add', 'review', 'allbooks', 'import', 'adminperf'].includes(curPage)) {
+  if (['detail', 'add', 'review', 'allbooks', 'import'].includes(curPage)) {
     navPage = 'home';
   }
-  const navMap = { home: 0, search: 1, scan: 2, reports: 3, settings: 4 };
+  const navMap = { home: 0, search: 1, scan: 2, settings: 3 };
   if (navMap[navPage] !== undefined) {
     document.querySelectorAll('.bnav-item')[navMap[navPage]].classList.add('active');
   }
@@ -1715,8 +1642,6 @@ function updateHeader() {
     review: 'قائمة المراجعة',
     allbooks: 'جميع الكتب',
     import: 'الاستيراد والتصدير',
-    reports: 'التقارير',
-    adminperf: 'أداء المستخدمين',
     settings: 'الإعدادات'
   };
   $('hdrTitle').textContent = titles[curPage] || 'جرد المكتبة';
@@ -1777,14 +1702,11 @@ async function doSearch() {
         const title = (b.title || '').toLowerCase();
         const author = (b.author || '').toLowerCase();
         const publisher = (b.publisher || '').toLowerCase();
-        const bib = (b.bib || '').toLowerCase();
-        const doctype = (b.doctype || '').toLowerCase();
-        const subjects = (b.subjects || '').toLowerCase();
 
         if (searchFilter === 'Title') return title.includes(query);
         if (searchFilter === 'Author') return author.includes(query);
         if (searchFilter === 'Publisher') return publisher.includes(query);
-        return title.includes(query) || author.includes(query) || publisher.includes(query) || bib.includes(query) || doctype.includes(query) || subjects.includes(query);
+        return title.includes(query) || author.includes(query) || publisher.includes(query);
       });
     }
   } catch (err) {
@@ -1803,10 +1725,8 @@ async function doSearch() {
       <div class="card-subtitle">${escapeHtml(b.author || '—')}</div>
       <div class="card-meta">
         <span>${b.publisher || '—'}</span>
-        ${b.bib ? '<span style="font-size:11px;color:var(--text-secondary);">bib: ' + escapeHtml(b.bib) + '</span>' : ''}
         <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
       </div>
-      ${b.doctype ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">التصنيف: ' + escapeHtml(b.doctype) + '</div>' : ''}
       ${!b.internal_barcode && b.inventory_status !== 'Found' ? `
         <button class="btn btn-success btn-small" style="margin-top: 10px; width: 100%;" onclick="cfDirect(${b.record_id}); event.stopPropagation();">✅ تأكيد</button>
       ` : ''}
@@ -2067,27 +1987,26 @@ async function showDet(id) {
   }
 
   const fields = [
+    ['رقم المكتبة', b.bib],
+    ['رقم التصنيف', b.doctype],
     ['العنوان', b.title],
     ['العنوان الفرعي', b.subtitle],
     ['المؤلف', b.author],
-    ['رقم السجل (bib)', b.bib],
-    ['رقم التصنيف', b.doctype || b.full_call_number],
-    ['التصنيف', b.category || b.library_source || 'أخرى'],
-    ['اللغة', b.language || b.lang],
+    ['اللغة', b.language],
     ['الناشر', b.publisher],
+    ['تاريخ النشر', b.pubdate],
     ['مكان النشر', b.pubplace],
-    ['تاريخ النشر', b.pubdate || b.publication_year],
-    ['الموضوعات', b.subjects],
-    ['الطبعة', b.edition],
-    ['رقم ديوي', b.diwi],
-    ['الوصف المادي', b.descriptions],
-    ['العدد', b.issue],
-    ['الصفحات', b.pages],
-    ['المصدر', b.library_source],
+    ['سنة النشر', b.publication_year],
     ['ISBN', b.isbn],
+    ['رقم ديوي', b.diwi],
+    ['رقم التصنيف الكامل', b.full_call_number],
+    ['المواضيع', b.subjects],
+    ['الطبعة', b.edition],
+    ['الوصف المادي', b.descriptions],
+    ['الملاحظات', b.notes],
     ['الموقع', b.location],
     ['الرف', b.shelf],
-    ['ملاحظات', b.notes || b.note505]
+    ['قاعدة المصدر', b.source_db]
   ].filter(f => f[1]);
 
   $('bookDet').innerHTML = `
@@ -2255,7 +2174,6 @@ async function addBook() {
     shelf: $('aSh').value.trim(),
     notes: '',
     internal_barcode: '',
-    category: $('aCat').value || 'أخرى',
     last_inventory_date: '',
     match_confidence: '',
     match_method: '',
@@ -2270,7 +2188,6 @@ async function addBook() {
   setTimeout(fullSync, 500);
   ['aT', 'aSt', 'aA', 'aP', 'aY', 'aI', 'aLoc', 'aSh'].forEach(id => $(id).value = '');
   $('aL').value = '';
-  $('aCat').value = '';
   showDet(b.record_id);
   addLog('Add', `Added new book: ${t}`);
 }
@@ -2282,49 +2199,9 @@ async function loadReview() {
   renderList(filtered, 'revList');
 }
 
-var allBooksStatusFilter = 'all';
-var allBooksCategoryFilter = 'all';
-
-function filterAllBooks(status) {
-  allBooksStatusFilter = status;
-  document.querySelectorAll('#allBooksFilter .chip').forEach(function(c) { c.classList.remove('active'); });
-  event.target.classList.add('active');
-  loadAllBooks();
-}
-
-function filterByCategory(cat) {
-  allBooksCategoryFilter = cat;
-  document.querySelectorAll('#categoryFilter .chip').forEach(function(c) { c.classList.remove('active'); });
-  event.target.classList.add('active');
-  loadAllBooks();
-}
-
 async function loadAllBooks() {
   const books = await dbAll();
-  var filtered = books;
-
-  if (allBooksStatusFilter !== 'all') {
-    filtered = filtered.filter(function(b) { return b.inventory_status === allBooksStatusFilter; });
-  }
-  if (allBooksCategoryFilter !== 'all') {
-    filtered = filtered.filter(function(b) { return (b.category || 'أخرى') === allBooksCategoryFilter; });
-  }
-
-  // Build category chips
-  var cats = {};
-  books.forEach(function(b) { var c = b.category || 'أخرى'; cats[c] = (cats[c]||0)+1; });
-  var catEl = $('categoryFilter');
-  if (catEl) {
-    var catHtml = '<button class="chip ' + (allBooksCategoryFilter === 'all' ? 'active' : '') + '" onclick="filterByCategory(\'all\')">كل التصنيفات</button>';
-    Object.keys(cats).sort().forEach(function(c) {
-      catHtml += '<button class="chip ' + (allBooksCategoryFilter === c ? 'active' : '') + '" onclick="filterByCategory(\'' + c + '\')">' + c + ' (' + cats[c] + ')</button>';
-    });
-    catEl.innerHTML = catHtml;
-  }
-
-  var countEl = $('allBooksCount');
-  if (countEl) countEl.textContent = 'عرض ' + filtered.length + ' من ' + books.length + ' كتاب';
-  renderList(filtered, 'allList');
+  renderList(books, 'allList');
 }
 
 function renderList(books, cid) {
@@ -2335,15 +2212,19 @@ function renderList(books, cid) {
   }
 
   c.innerHTML = books.map(b => `
-    <div class="card clickable" onclick="showDet(${b.record_id})" style="padding:16px;">
-      <div class="card-title" style="font-size:16px;font-weight:800;margin-bottom:10px;color:var(--primary);">${escapeHtml(b.title)}</div>
-      <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">المؤلف</span><span style="font-weight:600;">${escapeHtml(b.author || '—')}</span></div>
-        ${b.bib ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم السجل</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.bib) + '</span></div>' : ''}
-        ${b.doctype ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم التصنيف</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.doctype) + '</span></div>' : (b.full_call_number ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">رقم التصنيف</span><span style="font-weight:600;direction:ltr;">' + escapeHtml(b.full_call_number) + '</span></div>' : '')}
-        ${b.publisher ? '<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">الناشر</span><span style="font-weight:600;">' + escapeHtml(b.publisher) + '</span></div>' : ''}
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">التصنيف</span><span style="background:var(--primary-light);color:var(--primary);padding:2px 10px;border-radius:10px;font-size:12px;font-weight:700;">${escapeHtml(b.category || b.library_source || 'أخرى')}</span></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);">الحالة</span><span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span></div>
+    <div class="card clickable" onclick="showDet(${b.record_id})">
+      <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div style="flex: 1;">
+          <div class="card-title">${escapeHtml(b.title)}</div>
+          <div class="card-subtitle">${escapeHtml(b.author || '—')}</div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: 11px; color: var(--text-secondary);">
+            ${b.bib ? `<span>📖 ${escapeHtml(String(b.bib))}</span>` : ''}
+            ${b.publisher ? `<span>🏢 ${escapeHtml(b.publisher)}</span>` : ''}
+            ${b.pubdate ? `<span>📅 ${escapeHtml(b.pubdate)}</span>` : ''}
+            ${b.subjects ? `<span>📚 ${escapeHtml(b.subjects.length > 40 ? b.subjects.substring(0, 40) + '...' : b.subjects)}</span>` : ''}
+          </div>
+        </div>
+        <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
       </div>
     </div>
   `).join('');
@@ -2364,34 +2245,38 @@ async function startImport(e) {
   try {
     importAnalysis = await analyzeColumns(f);
     const { headers, sample, autoMap, totalRows } = importAnalysis;
-    const fields = ['title', 'subtitle', 'author', 'language', 'publisher', 'publication_year', 'isbn', 'full_call_number', 'inventory_status', 'location', 'shelf', 'condition', 'notes', 'internal_barcode', 'bib', 'doctype', 'subjects', 'diwi', 'pubdate', 'pubplace', 'edition', 'descriptions', 'library_source'];
+    const fields = ['bib', 'doctype', 'title', 'subtitle', 'author', 'language', 'publisher', 'pubdate', 'pubplace', 'publication_year', 'isbn', 'diwi', 'full_call_number', 'subjects', 'edition', 'descriptions', 'notes', 'inventory_status', 'location', 'shelf', 'condition', 'internal_barcode', 'source_db'];
     const fieldLabels = {
+      bib: 'رقم المكتبة (bib)',
+      doctype: 'رقم التصنيف (doctype)',
       title: 'العنوان *',
       subtitle: 'العنوان الفرعي',
       author: 'المؤلف',
       language: 'اللغة',
       publisher: 'الناشر',
+      pubdate: 'تاريخ النشر',
+      pubplace: 'مكان النشر',
       publication_year: 'السنة',
       isbn: 'ISBN',
-      full_call_number: 'رقم التصنيف',
+      diwi: 'رقم ديوي',
+      full_call_number: 'رقم التصنيف الكامل',
+      subjects: 'المواضيع',
+      edition: 'الطبعة',
+      descriptions: 'الوصف المادي',
+      notes: 'ملاحظات',
       inventory_status: 'حالة الجرد',
       location: 'الموقع',
       shelf: 'الرف',
       condition: 'الحالة',
-      notes: 'ملاحظات',
       internal_barcode: 'الباركود',
-      bib: 'رقم السجل (bib)',
-      doctype: 'رقم التصنيف (doctype)',
-      subjects: 'الموضوعات',
-      diwi: 'رقم ديوي',
-      pubdate: 'تاريخ النشر',
-      pubplace: 'مكان النشر',
-      edition: 'الطبعة',
-      descriptions: 'الوصف المادي',
-      library_source: 'المصدر (KFAA/KFAAL)'
+      source_db: 'قاعدة المصدر'
     };
 
     let html = `<div class="import-hint">📊 تم العثور على <b>${totalRows}</b> صف و <b>${headers.length}</b> عمود</div>`;
+    html += `<div style="margin: 12px 0; padding: 12px; background: var(--warning-light); border: 1px solid var(--warning); border-radius: 8px;">`;
+    html += `<label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">`;
+    html += `<input type="checkbox" id="deleteOldBooks" style="width: 18px; height: 18px;"> 🗑️ حذف الكتب القديمة قبل الاستيراد</label>`;
+    html += `<div style="font-size: 12px; color: #92400e; margin-top: 4px;">سيتم حذف جميع الكتب الحالية من قاعدة البيانات المحلية قبل استيراد الجديدة</div></div>`;
     html += `<h4 style="margin: 12px 0 8px; font-weight: 700; color: var(--text);">🔗 ربط الأعمدة</h4>`;
     html += `<table class="import-table"><thead><tr><th>الحقل</th><th>العمود</th></tr></thead><tbody>`;
 
@@ -2425,7 +2310,7 @@ async function startImport(e) {
 async function execImport() {
   if (!importFileRef) return;
 
-  const fields = ['title', 'subtitle', 'author', 'language', 'publisher', 'publication_year', 'isbn', 'full_call_number', 'inventory_status', 'location', 'shelf', 'condition', 'notes', 'internal_barcode'];
+  const fields = ['bib', 'doctype', 'title', 'subtitle', 'author', 'language', 'publisher', 'pubdate', 'pubplace', 'publication_year', 'isbn', 'diwi', 'full_call_number', 'subjects', 'edition', 'descriptions', 'notes', 'inventory_status', 'location', 'shelf', 'condition', 'internal_barcode', 'source_db'];
   const map = {};
 
   for (const f of fields) {
@@ -2434,12 +2319,19 @@ async function execImport() {
     else map[f] = '__NONE__';
   }
 
+  const deleteOld = document.getElementById('deleteOldBooks') && document.getElementById('deleteOldBooks').checked;
+
   const box = $('impBox');
   box.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">جاري الاستيراد...</div></div>';
 
   try {
+    if (deleteOld) {
+      const oldCount = await dbCount();
+      await dbClear();
+      addLog('Import', `Deleted ${oldCount} old books before import`);
+    }
     const { count } = await importFile(importFileRef, map);
-    box.innerHTML = `<div class="import-hint" style="background: var(--success-light); border-color: var(--success); color: #15803d;">✅ تم استيراد <b>${count}</b> كتاب بنجاح!</div>`;
+    box.innerHTML = `<div class="import-hint" style="background: var(--success-light); border-color: var(--success); color: #15803d;">✅ تم استيراد <b>${count}</b> كتاب بنجاح!${deleteOld ? ' (تم حذف القديمة أولاً)' : ''}</div>`;
     showToast(`✅ ${count} كتاب`);
     importFileRef = null;
     addLog('Import', `Successfully imported ${count} books`);
@@ -2777,11 +2669,11 @@ function showMainApp() {
   document.querySelector('.hdr').style.display = '';
   nav('home');
 
-  // Always try to load OpenAI key from Supabase (for ALL users — admin and non-admin)
-  if (CONFIG.supabaseUrl) {
+  // Always try to load OpenAI key from Supabase (for all users, not just non-admin)
+  if (CONFIG.supabaseUrl && !CONFIG.openaiKey) {
     loadConfigFromSupabase().then(function(loaded) {
       if (loaded) {
-        addLog('Config', 'OpenAI key loaded/refreshed from cloud');
+        addLog('Config', 'OpenAI key loaded from cloud');
         _saveConfigToAllStores();
       }
       updConn();
@@ -2790,7 +2682,7 @@ function showMainApp() {
     });
   } else {
     updConn();
-    // Start auto-sync + realtime immediately (if config exists)
+    // Start auto-sync + realtime immediately
     startAutoSync();
   }
 }
@@ -2854,213 +2746,9 @@ function copyTeamCode() {
   }
 }
 
-// ============ REPORTS ============
-async function loadReports() {
-  var books = await dbAll();
-  var total = books.length;
-  var found = books.filter(function(b) { return b.inventory_status === 'Found'; }).length;
-  var notChecked = books.filter(function(b) { return b.inventory_status === 'Not Checked'; }).length;
-  var notFound = books.filter(function(b) { return b.inventory_status === 'Not Found'; }).length;
-
-  // Category stats
-  var cats = {};
-  books.forEach(function(b) { var c = b.category || 'أخرى'; cats[c] = (cats[c]||0)+1; });
-  var sortedCats = Object.entries(cats).sort(function(a,b) { return b[1]-a[1]; });
-
-  // Author stats
-  var authors = {};
-  books.forEach(function(b) { if(b.author) { var a = b.author.split(',')[0].trim(); if(a.length > 1) authors[a] = (authors[a]||0)+1; }});
-  var topAuthors = Object.entries(authors).sort(function(a,b) { return b[1]-a[1]; }).slice(0,10);
-
-  // Year stats
-  var years = {};
-  books.forEach(function(b) {
-    var y = String(b.publication_year||'').match(/\d{4}/);
-    if(y) years[y[0]] = (years[y[0]]||0)+1;
-  });
-  var sortedYears = Object.entries(years).sort(function(a,b) { return a[0]-b[0]; });
-
-  var foundPct = total ? Math.round(found/total*100) : 0;
-  var notCheckedPct = total ? Math.round(notChecked/total*100) : 0;
-  var notFoundPct = total ? Math.round(notFound/total*100) : 0;
-
-  var html = '';
-
-  // Summary cards
-  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:8px;">';
-  html += '<div class="card" style="text-align:center;background:var(--primary);color:#fff;"><div style="font-size:28px;font-weight:800;">' + total + '</div><div style="font-size:12px;opacity:0.9;">إجمالي الكتب</div></div>';
-  html += '<div class="card" style="text-align:center;background:var(--success);color:#fff;"><div style="font-size:28px;font-weight:800;">' + foundPct + '%</div><div style="font-size:12px;opacity:0.9;">نسبة الجرد</div></div>';
-  html += '</div>';
-
-  // Status breakdown
-  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">حالة الجرد</div>';
-  html += '<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;"><span>موجود</span><span style="font-weight:700;color:var(--success);">' + found + ' (' + foundPct + '%)</span></div><div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + foundPct + '%;background:var(--success);border-radius:4px;"></div></div></div>';
-  html += '<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;"><span>غير مفحوص</span><span style="font-weight:700;color:var(--warning);">' + notChecked + ' (' + notCheckedPct + '%)</span></div><div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + notCheckedPct + '%;background:var(--warning);border-radius:4px;"></div></div></div>';
-  html += '<div><div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;"><span>مفقود</span><span style="font-weight:700;color:var(--error);">' + notFound + ' (' + notFoundPct + '%)</span></div><div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + notFoundPct + '%;background:var(--error);border-radius:4px;"></div></div></div>';
-  html += '</div>';
-
-  // Category breakdown
-  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">التصنيفات</div>';
-  sortedCats.forEach(function(c) {
-    var pct = Math.round(c[1]/total*100);
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>' + c[0] + '</span><div style="display:flex;align-items:center;gap:8px;"><div style="width:60px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:var(--primary);border-radius:3px;"></div></div><span style="font-weight:700;min-width:40px;text-align:left;">' + c[1] + '</span></div></div>';
-  });
-  html += '</div>';
-
-  // Top authors
-  if (topAuthors.length > 0) {
-    html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">أكثر المؤلفين</div>';
-    topAuthors.forEach(function(a, i) {
-      html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>' + (i+1) + '. ' + escapeHtml(a[0]) + '</span><span style="font-weight:700;color:var(--primary);">' + a[1] + '</span></div>';
-    });
-    html += '</div>';
-  }
-
-  // Publication years
-  if (sortedYears.length > 0) {
-    var maxYear = Math.max.apply(null, sortedYears.map(function(y) { return y[1]; }));
-    html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">توزيع سنوات النشر</div>';
-    sortedYears.forEach(function(y) {
-      var pct = Math.round(y[1]/maxYear*100);
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;"><span style="min-width:40px;direction:ltr;">' + y[0] + '</span><div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:var(--primary);border-radius:3px;"></div></div><span style="font-weight:700;min-width:24px;">' + y[1] + '</span></div>';
-    });
-    html += '</div>';
-  }
-
-  $('reportContent').innerHTML = html;
-}
-
-// ============ ADMIN PERFORMANCE ============
-async function loadAdminPerf() {
-  if (!isAdmin()) { $('adminPerfContent').innerHTML = '<div class="empty-state"><div class="empty-text">متاح للمسؤول فقط</div></div>'; return; }
-
-  var loginLog = typeof getLoginLog === 'function' ? getLoginLog() : [];
-  var activityLog = typeof getActivityLog === 'function' ? getActivityLog() : [];
-  var books = await dbAll();
-
-  var loginCounts = {};
-  loginLog.forEach(function(e) { loginCounts[e.user] = (loginCounts[e.user]||0)+1; });
-
-  var invCounts = {};
-  books.forEach(function(b) { if(b.inventoried_by) invCounts[b.inventoried_by] = (invCounts[b.inventoried_by]||0)+1; });
-
-  var addCounts = {};
-  activityLog.filter(function(a) { return a.action === 'إضافة كتاب'; }).forEach(function(a) { addCounts[a.user] = (addCounts[a.user]||0)+1; });
-
-  var html = '';
-
-  // User performance table
-  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">أداء المستخدمين</div>';
-  html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
-  html += '<tr style="background:var(--bg);"><th style="padding:10px;text-align:right;border-bottom:2px solid var(--border);">المستخدم</th><th style="padding:10px;text-align:center;border-bottom:2px solid var(--border);">دخول</th><th style="padding:10px;text-align:center;border-bottom:2px solid var(--border);">جرد</th><th style="padding:10px;text-align:center;border-bottom:2px solid var(--border);">إضافة</th></tr>';
-
-  var allUsers = {};
-  Object.keys(loginCounts).forEach(function(u) { allUsers[u] = true; });
-  Object.keys(invCounts).forEach(function(u) { allUsers[u] = true; });
-  Object.keys(addCounts).forEach(function(u) { allUsers[u] = true; });
-
-  Object.keys(allUsers).forEach(function(u) {
-    html += '<tr><td style="padding:10px;border-bottom:1px solid var(--border);font-weight:600;">' + escapeHtml(u) + '</td>';
-    html += '<td style="padding:10px;text-align:center;border-bottom:1px solid var(--border);">' + (loginCounts[u]||0) + '</td>';
-    html += '<td style="padding:10px;text-align:center;border-bottom:1px solid var(--border);color:var(--success);font-weight:700;">' + (invCounts[u]||0) + '</td>';
-    html += '<td style="padding:10px;text-align:center;border-bottom:1px solid var(--border);color:var(--primary);font-weight:700;">' + (addCounts[u]||0) + '</td></tr>';
-  });
-  if (Object.keys(allUsers).length === 0) {
-    html += '<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--text-secondary);">لا توجد بيانات بعد</td></tr>';
-  }
-  html += '</table></div></div>';
-
-  // Activity log
-  html += '<div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:12px;">سجل النشاطات</div>';
-  html += '<div style="max-height:400px;overflow-y:auto;">';
-  activityLog.slice(0, 100).forEach(function(a) {
-    var time = new Date(a.timestamp);
-    var timeStr = time.toLocaleDateString('ar-SA') + ' ' + time.toLocaleTimeString('ar-SA', {hour:'2-digit',minute:'2-digit'});
-    html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;">';
-    html += '<div><span style="font-weight:700;color:var(--primary);">' + escapeHtml(a.user) + '</span> — ' + escapeHtml(a.action);
-    if (a.details) html += ' <span style="color:var(--text-secondary);">(' + escapeHtml(a.details) + ')</span>';
-    html += '</div>';
-    html += '<span style="color:var(--text-secondary);white-space:nowrap;margin-right:8px;">' + timeStr + '</span>';
-    html += '</div>';
-  });
-  if (!activityLog.length) html += '<div style="text-align:center;color:var(--text-secondary);padding:20px;">لا توجد نشاطات مسجلة بعد</div>';
-  html += '</div></div>';
-
-  $('adminPerfContent').innerHTML = html;
-}
-
-// ============ TEXT FILE IMPORT ============
-function handleTextFileImport(e) {
-  var file = e.target.files[0];
-  if (!file) return;
-  e.target.value = '';
-
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    var buffer = ev.target.result;
-    var text;
-    try {
-      var decoder = new TextDecoder('windows-1256');
-      text = decoder.decode(buffer);
-    } catch(err) {
-      text = new TextDecoder('utf-8').decode(buffer);
-    }
-
-    var books = typeof parseLibraryTextFile === 'function' ? parseLibraryTextFile(text) : [];
-    if (!books.length) {
-      showToast('⚠️ لم يتم العثور على كتب في الملف');
-      return;
-    }
-
-    var previewHtml = '<div class="import-hint" style="background:var(--success-light);border-color:var(--success);color:#15803d;">📚 تم استخراج <b>' + books.length + '</b> كتاب من الملف</div>';
-    previewHtml += '<div style="max-height:300px;overflow-y:auto;margin-bottom:12px;">';
-    books.slice(0, 20).forEach(function(b, i) {
-      previewHtml += '<div class="card" style="padding:10px;margin-bottom:6px;"><div style="font-weight:700;font-size:13px;">' + (i+1) + '. ' + escapeHtml(b.title) + '</div>';
-      previewHtml += '<div style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(b.author || '—') + ' | ' + escapeHtml(b.category) + '</div></div>';
-    });
-    if (books.length > 20) previewHtml += '<div style="text-align:center;color:var(--text-secondary);font-size:13px;padding:8px;">... و ' + (books.length - 20) + ' كتاب آخر</div>';
-    previewHtml += '</div>';
-    previewHtml += '<button class="btn btn-success" onclick="execTextImport()">📥 استيراد ' + books.length + ' كتاب</button>';
-
-    $('textImportPreview').innerHTML = previewHtml;
-    window._pendingTextBooks = books;
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-async function execTextImport() {
-  var books = window._pendingTextBooks;
-  if (!books || !books.length) return;
-
-  $('textImportPreview').innerHTML = '<div style="text-align:center;padding:20px;"><div class="spinner" style="margin:0 auto;margin-bottom:10px;"></div><div class="loading-text">جاري الاستيراد...</div></div>';
-
-  var count = 0;
-  for (var i = 0; i < books.length; i++) {
-    var b = books[i];
-    await dbAdd({
-      title: b.title || '', subtitle: '', author: b.author || '', additional_author: '',
-      language: 'Arabic', publisher: b.publisher || '', publication_year: b.publication_year || '',
-      isbn: '', dewey_number: b.dewey_number || '', cutter_number: '',
-      full_call_number: b.full_call_number || '', material_type: 'Book',
-      inventory_status: 'Not Checked', condition: 'Good', location: '', shelf: '',
-      notes: '', internal_barcode: '', subject: b.subject || '', category: b.category || 'أخرى',
-      last_inventory_date: '', match_confidence: '', match_method: '',
-      review_status: 'Pending', cover_image_name: '',
-      added_by: currentUser ? currentUser.name : 'admin',
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-    });
-    count++;
-  }
-
-  $('textImportPreview').innerHTML = '<div class="import-hint" style="background:var(--success-light);border-color:var(--success);color:#15803d;">✅ تم استيراد <b>' + count + '</b> كتاب بنجاح!</div>';
-  showToast('✅ تم استيراد ' + count + ' كتاب');
-  window._pendingTextBooks = null;
-  setTimeout(fullSync, 500);
-}
-
 // ============ SERVICE WORKER ============
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(e => {
+  navigator.serviceWorker.register('/sw.js').catch(e => {
     console.log('SW registration failed:', e);
     addLog('ServiceWorker', `Registration failed: ${e.message}`);
   });
