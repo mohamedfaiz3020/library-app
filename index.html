@@ -1,2978 +1,724 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="جرد المكتبة">
-<meta name="theme-color" content="#0f172a">
-<!-- V3 20260410e: aggressive cache-busting so phones always pull the latest -->
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<meta name="app-version" content="20260410e">
-<title>جرد المكتبة v5</title>
-<link rel="manifest" href="manifest.json?v=20260410e">
-<style>:root {
-  --primary: #1e3a5f;
-  --primary-dark: #0f2440;
-  --primary-light: #e8eef6;
-  --primary-glow: rgba(30, 58, 95, 0.12);
-  --accent: #c9a84c;
-  --accent-light: #faf5e8;
-  --success: #0d9f6e;
-  --success-light: #e6f9f1;
-  --warning: #d4850a;
-  --warning-light: #fef4e2;
-  --error: #d63031;
-  --error-light: #fde8e8;
-  --bg: #f4f6f9;
-  --card: #ffffff;
-  --text: #1a1f36;
-  --text-secondary: #6b7894;
-  --border: #e3e8ef;
-  --radius: 14px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
-  --shadow-lg: 0 8px 30px rgba(0,0,0,0.08);
-  --st: env(safe-area-inset-top, 20px);
-  --sb: env(safe-area-inset-bottom, 20px);
-  --font: 'SF Pro Arabic', -apple-system, system-ui, sans-serif;
-  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
+/* ============================================================
+   app.v5c.patch.js  —  Hotfix v3 for app.v5c.js?v=20260408b
+   Generated: 2026-04-10
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent;
-}
+   IMPORTANT: This script MUST load BEFORE app.v5c.js,
+   so that window.fetch is wrapped before the main app
+   captures a reference to it. See INSTALL.md.
 
-html, body {
-  width: 100%;
-  height: 100%;
-  position: fixed;
-  overflow: hidden;
-}
+   Bugs fixed in v1/v2 (kept):
+     1. startAutoSync() DEFINED but never CALLED → now poll+call.
+     2. pushToCloud sends "" for timestamptz/integer → PG 22007/22P02
+        → cleanRow() converts every "" to null on every payload.
+     3. Failure loop DDoS → rate limiter (500 fails/60s → 2min cooldown).
+     4. Stale sync_queue auto-cleared on load.
+     5. First 5 error responses captured to window.__patchErrors.
+     6. Load order: patch before app.v5c.js so fetch wrap is active.
 
-body {
-  font-family: var(--font);
-  background: var(--bg);
-  color: var(--text);
-  direction: rtl;
-  -webkit-font-smoothing: antialiased;
-}
+   NEW in v3 (20260410e):
+     7. queueSync() is wrapped: every time the main app queues a sync
+        item, we schedule a debounced pushToCloud() in 400 ms. This
+        turns the 15-second sync tick into sub-second push latency
+        for all writes including Excel bulk imports.
+     8. realtimeWs.onmessage is wrapped: on every postgres_changes
+        event received from Supabase, we force the receiving tab's
+        UI to refresh (pullFromCloud + loadHome + updateSyncBadge).
+        This fixes "colleague's device doesn't update without F5".
+     9. After every successful local write (POST/PATCH/DELETE) to
+        /rest/v1/books, we also trigger a local UI refresh so the
+        admin who ran the import/edit sees the results immediately
+        without waiting for the realtime echo.
+    10. Public bulk push helper window.__patchFlushQueue() so tests
+        can force an immediate push from console.
+    11. Version bumped to 20260410e for cache busting.
+    12. ROOT CAUSE FIX for Excel sync (confirmed live 2026-04-10):
+        pullFromCloud() fires dozens of unawaited readwrite
+        transactions on the `books` store, which deadlock it.
+        dbAdd() then hangs forever — Excel import silently stalls
+        and nothing reaches Supabase. v3 wraps importFile() to
+        POST the parsed rows directly to Supabase in ONE bulk
+        request through the patched fetch wrapper, bypassing the
+        deadlocked dbAdd path. It also wraps pushToCloud so sync
+        doesn't depend on the broken sync_queue drain.
 
-/* HEADER */
-.hdr {
-  background: linear-gradient(135deg, #0f2440 0%, #1e3a5f 50%, #243f5f 100%);
-  color: #ffffff;
-  padding: calc(var(--st) + 12px) 16px 14px;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  box-shadow: var(--shadow-md);
-  border-bottom: 1px solid rgba(201, 168, 76, 0.15);
-}
+   NEW in v3.1 (20260410f):
+    13. ONE-SHOT LOCAL RESET. The Supabase `books` table was wiped
+        clean on 2026-04-10 at the user's explicit request to
+        prepare for the 56k bulk import. Every device that still
+        has stale rows in its IndexedDB MUST also be wiped, or
+        the next sync will re-upload the old data.
 
-.hdr-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: 1;
-}
+        This patch runs a guarded one-shot cleaner on load:
+          - checks localStorage.lib_reset_marker
+          - if not '20260410f-reset-v1':
+              * clears IndexedDB `books` store
+              * clears IndexedDB `sync_queue` store
+              * sets the marker
+              * logs to console as [PATCH 20260410f] reset-local
+        After the marker is set, the block is a no-op forever.
+   ============================================================ */
+(function () {
+  'use strict';
 
-.hdr-btn {
-  background: rgba(255, 255, 255, 0.12);
-  border: none;
-  color: #ffffff;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  font-size: 18px;
-  cursor: pointer;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  transition: var(--transition);
-}
-
-.hdr-btn:active {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.hdr-btn.visible {
-  display: flex;
-}
-
-.hdr h1 {
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.hdr-badges {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.badge {
-  font-size: 10px;
-  padding: 5px 12px;
-  border-radius: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.badge-online {
-  background: var(--success);
-  color: #ffffff;
-}
-
-.badge-offline {
-  background: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-}
-
-.badge-synced {
-  background: var(--success);
-  color: #ffffff;
-}
-
-.badge-syncing {
-  background: var(--warning);
-  color: #ffffff;
-  animation: pulse 1s infinite;
-}
-
-.badge-sync-error {
-  background: var(--error);
-  color: #ffffff;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-/* CONTENT AREA */
-.content-wrapper {
-  position: fixed;
-  top: calc(56px + var(--st));
-  left: 0;
-  right: 0;
-  bottom: calc(56px + var(--sb));
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  z-index: 1;
-}
-
-/* PAGES */
-.page {
-  display: none;
-  padding: 16px;
-  padding-bottom: 16px;
-  min-height: 100%;
-  animation: slideIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.page.active {
-  display: block;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
+  var PATCH_VERSION = '20260410f';
+  var RESET_MARKER  = '20260410f-reset-v1';
+  function LOG() {
+    try {
+      var a = ['[PATCH ' + PATCH_VERSION + ']'];
+      for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
+      console.log.apply(console, a);
+    } catch (e) {}
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  function WARN() {
+    try {
+      var a = ['[PATCH ' + PATCH_VERSION + ']'];
+      for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
+      console.warn.apply(console, a);
+    } catch (e) {}
   }
-}
 
-/* PULL TO REFRESH */
-.ptr-indicator {
-  padding: 12px;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 13px;
-  display: none;
-}
-
-.ptr-indicator.show {
-  display: block;
-}
-
-/* CARDS */
-.card {
-  background: var(--card);
-  border-radius: 16px;
-  padding: 16px;
-  margin-bottom: 12px;
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  transition: var(--transition);
-}
-
-.card.clickable {
-  cursor: pointer;
-}
-
-.card.clickable:active {
-  transform: scale(0.98);
-  box-shadow: var(--shadow-md);
-}
-
-.card-title {
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 4px;
-  line-height: 1.4;
-  color: var(--text);
-}
-
-.card-subtitle {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  margin-bottom: 8px;
-}
-
-.card-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-/* HERO SECTION */
-.hero {
-  background: linear-gradient(135deg, #0f2440 0%, #1e3a5f 60%, #2a4a6b 100%);
-  color: #ffffff;
-  border-radius: 20px;
-  padding: 28px;
-  margin-bottom: 20px;
-  text-align: center;
-  box-shadow: var(--shadow-lg);
-}
-
-.hero-title {
-  font-size: 20px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: #ffffff;
-}
-
-.hero-subtitle {
-  font-size: 13px;
-  opacity: 0.9;
-  margin-bottom: 20px;
-  line-height: 1.5;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.stat-item {
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  padding: 14px 8px;
-  text-align: center;
-}
-
-.stat-number {
-  font-size: 22px;
-  font-weight: 800;
-  display: block;
-}
-
-.stat-label {
-  font-size: 10px;
-  opacity: 0.85;
-  margin-top: 4px;
-  display: block;
-}
-
-/* SEARCH BAR */
-.search-box {
-  position: relative;
-  margin-bottom: 16px;
-}
-
-.search-box input {
-  width: 100%;
-  padding: 14px 16px 14px 44px;
-  border-radius: 12px;
-  border: 1.5px solid var(--border);
-  font-size: 16px;
-  background: var(--card);
-  font-family: inherit;
-  direction: auto;
-  transition: var(--transition);
-}
-
-.search-box input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 4px var(--primary-glow);
-}
-
-.search-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  pointer-events: none;
-}
-
-/* BUTTONS */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 14px 20px;
-  border-radius: 12px;
-  border: none;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  transition: var(--transition);
-  width: 100%;
-  letter-spacing: 0.3px;
-}
-
-.btn:active {
-  transform: scale(0.98);
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #1e3a5f, #2a4d73);
-  color: #ffffff;
-  box-shadow: var(--shadow-md);
-}
-
-.btn-primary:active {
-  background: linear-gradient(135deg, #1a3150, #243f5f);
-}
-
-.btn-success {
-  background: var(--success);
-  color: #ffffff;
-}
-
-.btn-warning {
-  background: var(--warning);
-  color: #ffffff;
-}
-
-.btn-error {
-  background: var(--error);
-  color: #ffffff;
-}
-
-.btn-ghost {
-  background: transparent;
-  border: 1.5px solid var(--border);
-  color: var(--text);
-}
-
-.btn-small {
-  padding: 10px 14px;
-  font-size: 13px;
-  width: auto;
-}
-
-.btn-group {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.btn-row {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-row .btn {
-  flex: 1;
-}
-
-/* QUICK ACTION CARDS */
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.action-card {
-  background: var(--card);
-  border-radius: 16px;
-  padding: 20px 14px;
-  text-align: center;
-  cursor: pointer;
-  transition: var(--transition);
-  box-shadow: var(--shadow);
-  border: 1.5px solid var(--border);
-  position: relative;
-}
-
-.action-card:active {
-  transform: scale(0.96);
-  box-shadow: var(--shadow-md);
-}
-
-.action-card.highlight {
-  border-color: var(--primary);
-  background: linear-gradient(135deg, rgba(30, 58, 95, 0.05), rgba(201, 168, 76, 0.05));
-}
-
-.action-icon {
-  font-size: 32px;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.action-icon svg {
-  width: 28px;
-  height: 28px;
-  color: var(--primary);
-}
-
-.action-title {
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 3px;
-  color: var(--text);
-}
-
-.action-subtitle {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-/* FILTER CHIPS */
-.filter-chips {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: 6px;
-}
-
-.chip {
-  padding: 8px 16px;
-  border-radius: 24px;
-  font-size: 13px;
-  font-weight: 600;
-  border: 1.5px solid var(--border);
-  background: var(--card);
-  cursor: pointer;
-  white-space: nowrap;
-  font-family: inherit;
-  transition: var(--transition);
-}
-
-.chip.active {
-  background: linear-gradient(135deg, #1e3a5f, #2a4d73);
-  color: #ffffff;
-  border-color: transparent;
-}
-
-/* FORM ELEMENTS */
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: var(--text);
-}
-
-.form-input {
-  width: 100%;
-  padding: 14px 16px;
-  border-radius: 12px;
-  border: 1.5px solid var(--border);
-  font-size: 16px;
-  font-family: inherit;
-  background: var(--card);
-  direction: auto;
-  transition: var(--transition);
-  -webkit-appearance: none;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 4px var(--primary-glow);
-}
-
-select.form-input {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M6 8L1 3h10z' fill='%236b7894'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: 14px center;
-  appearance: none;
-  padding-right: 40px;
-}
-
-/* SCAN MODE SELECTOR */
-.scan-modes {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.scan-mode {
-  background: var(--card);
-  border: 1.5px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 12px;
-  text-align: center;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.scan-mode.active {
-  border-color: var(--primary);
-  background: var(--primary-light);
-}
-
-.scan-mode-icon {
-  font-size: 26px;
-  margin-bottom: 6px;
-  display: block;
-}
-
-.scan-mode-name {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.scan-hint {
-  background: var(--warning-light);
-  border: 1px solid rgba(212, 133, 10, 0.2);
-  border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 12px;
-  margin-bottom: 16px;
-  line-height: 1.6;
-  color: #7d5500;
-}
-
-/* IMAGE PREVIEW */
-.image-container {
-  background: #000000;
-  border-radius: 16px;
-  overflow: hidden;
-  margin-bottom: 16px;
-  min-height: 60px;
-  max-height: 280px;
-  box-shadow: var(--shadow-md);
-}
-
-.image-container img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.image-placeholder {
-  padding: 30px;
-  text-align: center;
-  color: #94a3b8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 180px;
-  background: #1a202c;
-}
-
-/* LOADING STATE */
-.loading-container {
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 30px;
-  margin-bottom: 16px;
-}
-
-.loading-container.show {
-  display: flex;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 2.5px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 14px;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-text {
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: center;
-  margin-bottom: 8px;
-}
-
-.loading-method {
-  font-size: 11px;
-  background: var(--primary-light);
-  color: var(--primary-dark);
-  padding: 4px 14px;
-  border-radius: 12px;
-  font-weight: 700;
-}
-
-/* OCR RESULTS */
-.ocr-card {
-  background: var(--card);
-  border-radius: 16px;
-  border: 1.5px solid var(--border);
-  padding: 16px;
-  margin-bottom: 14px;
-}
-
-.ocr-field {
-  margin-bottom: 12px;
-}
-
-.ocr-field:last-child {
-  margin-bottom: 0;
-}
-
-.ocr-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: 700;
-  margin-bottom: 5px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ocr-value {
-  font-size: 14px;
-  color: var(--text);
-  font-weight: 600;
-  word-break: break-word;
-}
-
-/* MATCH RESULTS */
-.match-card {
-  background: var(--card);
-  border-radius: 16px;
-  border: 1.5px solid var(--border);
-  padding: 16px;
-  margin-bottom: 12px;
-  position: relative;
-  transition: var(--transition);
-}
-
-.match-card.best {
-  border-color: var(--success);
-  background: var(--success-light);
-  border-width: 2px;
-}
-
-.match-badge {
-  position: absolute;
-  top: -11px;
-  right: 14px;
-  background: var(--success);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 4px 12px;
-  border-radius: 10px;
-  box-shadow: var(--shadow-md);
-}
-
-.match-title {
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 4px;
-  line-height: 1.4;
-  color: var(--text);
-}
-
-.match-subtitle {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  margin-bottom: 10px;
-}
-
-.match-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  font-size: 13px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.match-label {
-  color: var(--text-secondary);
-}
-
-.confidence-bar {
-  height: 6px;
-  background: #e2e8f0;
-  border-radius: 3px;
-  margin-top: 10px;
-  overflow: hidden;
-}
-
-.confidence-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.5s ease;
-}
-
-.confidence-90 { background: var(--success); }
-.confidence-70 { background: var(--success); }
-.confidence-50 { background: var(--warning); }
-.confidence-40 { background: var(--warning); }
-.confidence-below { background: var(--error); }
-
-.match-breakdown {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* EMPTY STATE */
-.empty-state {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-secondary);
-}
-
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 14px;
-}
-
-.empty-text {
-  font-size: 14px;
-  margin-bottom: 20px;
-  line-height: 1.6;
-}
-
-/* DETAIL VIEW */
-.detail-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.detail-field {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  font-size: 13px;
-}
-
-.detail-field:last-child {
-  border-bottom: none;
-}
-
-.detail-label {
-  color: var(--text-secondary);
-  font-weight: 600;
-  flex: 0 0 100px;
-}
-
-.detail-value {
-  color: var(--text);
-  font-weight: 600;
-  flex: 1;
-  word-break: break-word;
-  text-align: left;
-}
-
-.barcode-display {
-  background: var(--card);
-  border-radius: 16px;
-  border: 1.5px solid var(--border);
-  padding: 18px;
-  margin-bottom: 16px;
-  text-align: center;
-}
-
-.barcode-text {
-  font-family: 'Courier New', monospace;
-  font-size: 18px;
-  font-weight: 700;
-  margin-top: 12px;
-  color: var(--primary);
-  direction: ltr;
-  letter-spacing: 1px;
-}
-
-/* IMPORT/EXPORT */
-.import-section {
-  display: none;
-}
-
-.import-section.show {
-  display: block;
-}
-
-.import-hint {
-  background: var(--warning-light);
-  border: 1px solid rgba(212, 133, 10, 0.2);
-  border-radius: 12px;
-  padding: 14px;
-  font-size: 12px;
-  margin-bottom: 16px;
-  color: #7d5500;
-  line-height: 1.6;
-}
-
-.import-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 16px;
-  font-size: 12px;
-  background: var(--card);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
-}
-
-.import-table th,
-.import-table td {
-  padding: 12px 14px;
-  text-align: right;
-  border-bottom: 1px solid var(--border);
-}
-
-.import-table th {
-  background: var(--bg);
-  font-weight: 700;
-  color: var(--text);
-}
-
-.import-table td {
-  color: var(--text-secondary);
-}
-
-.import-table tr:last-child td {
-  border-bottom: none;
-}
-
-.import-table select {
-  width: 100%;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  font-size: 12px;
-  font-family: inherit;
-}
-
-.sample-data {
-  overflow-x: auto;
-  font-size: 11px;
-  background: var(--card);
-  padding: 14px;
-  border-radius: 12px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
-}
-
-.sample-data table {
-  white-space: nowrap;
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.sample-data th {
-  font-weight: 700;
-  padding: 8px;
-  text-align: right;
-  border-bottom: 1px solid var(--border);
-}
-
-.sample-data td {
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-/* SETTINGS */
-.settings-section {
-  margin-bottom: 24px;
-}
-
-.settings-title {
-  font-size: 14px;
-  font-weight: 700;
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-  border-bottom: 1.5px solid var(--border);
-  color: var(--text);
-}
-
-.debug-panel {
-  background: var(--card);
-  border-radius: 16px;
-  border: 1.5px solid var(--border);
-  padding: 0;
-  margin-bottom: 16px;
-  overflow: hidden;
-}
-
-.debug-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  background: var(--bg);
-  transition: var(--transition);
-}
-
-.debug-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.debug-icon {
-  font-size: 16px;
-  transition: transform 0.2s ease;
-  color: var(--text-secondary);
-}
-
-.debug-icon.open {
-  transform: rotate(180deg);
-}
-
-.debug-content {
-  display: none;
-  padding: 14px 16px;
-  max-height: 300px;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.debug-content.open {
-  display: block;
-}
-
-.debug-entry {
-  font-size: 11px;
-  font-family: 'Courier New', monospace;
-  margin-bottom: 8px;
-  padding: 8px 10px;
-  background: var(--bg);
-  border-radius: 6px;
-  border-left: 2px solid var(--primary);
-  line-height: 1.4;
-  word-break: break-all;
-}
-
-.debug-entry.error {
-  border-left-color: var(--error);
-  background: #fde8e8;
-}
-
-.debug-entry.warning {
-  border-left-color: var(--warning);
-  background: #fef4e2;
-}
-
-.debug-time {
-  color: var(--text-secondary);
-  font-weight: 700;
-  display: inline;
-  margin-right: 6px;
-}
-
-.bottom-nav {
-  display: none;
-}
-
-.bnav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  padding: 0;
-  z-index: 101;
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  height: calc(56px + var(--sb));
-  padding-bottom: var(--sb);
-  box-shadow: 0 -1px 3px rgba(0,0,0,0.04);
-}
-
-.bnav-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 56px;
-  cursor: pointer;
-  transition: var(--transition);
-  color: var(--text-secondary);
-  position: relative;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.bnav-item.active {
-  color: var(--primary);
-}
-
-.bnav-item.active::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 3px;
-  height: 3px;
-  background: var(--primary);
-  border-radius: 50%;
-}
-
-.bnav-icon {
-  font-size: 24px;
-  margin-bottom: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.bnav-label {
-  font-size: 10px;
-}
-
-/* LOGIN PAGE STYLES */
-.copyright {
-  font-size: 12px;
-  color: #94a3b8;
-  margin-top: auto;
-  padding-top: 32px;
-}
-
-/* UTILITIES */
-.mt-0 { margin-top: 0; }
-.mb-0 { margin-bottom: 0; }
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation: none !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-@media (max-height: 600px) {
-  .page {
-    padding: 12px;
-  }
-  .hero {
-    padding: 16px;
-  }
-  .stats-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
-  }
-}</style>
-</head>
-<body>
-
-<!-- HEADER -->
-<header class="hdr">
-  <div class="hdr-left">
-    <button class="hdr-btn" id="hdrBack" onclick="goBack()">→</button>
-    <h1 id="hdrTitle">جرد المكتبة</h1>
-  </div>
-  <div class="hdr-badges">
-    <span class="badge badge-offline" id="connBadge">🔌</span>
-    <span class="badge badge-offline" id="syncBadge">⏳</span>
-  </div>
-</header>
-
-<!-- CONTENT -->
-<div class="content-wrapper">
-
-<!-- LOGIN PAGE -->
-<div class="page active" id="pgLogin">
-  <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:80vh; padding:24px;">
-    <div style="font-size:64px; margin-bottom:16px;"><svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#1e3a5f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><line x1="8" y1="7" x2="16" y2="7"></line><line x1="8" y1="11" x2="13" y2="11"></line></svg></div>
-    <h1 style="font-size:24px; font-weight:800; margin-bottom:4px;">نظام جرد المكتبة</h1>
-    <p style="color:var(--text-secondary); margin-bottom:32px; font-size:14px;">KFAA Smart Library</p>
-
-    <div style="width:100%; max-width:360px;">
-      <!-- Team Code Section (first time setup) -->
-      <div id="teamSetupBox" style="display:none; margin-bottom:24px;">
-        <div style="background:var(--warning-light); border-radius:12px; padding:16px; margin-bottom:12px;">
-          <div style="font-weight:700; margin-bottom:8px; font-size:14px;">🔗 إعداد الاتصال</div>
-          <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">اطلب رمز الفريق من المسؤول</p>
-          <input type="text" class="form-input" id="teamCodeInput" placeholder="الصق رمز الفريق هنا..." style="direction:ltr; text-align:center; font-family:monospace; font-size:13px;" />
-          <button class="btn btn-primary" onclick="handleTeamCode()" style="margin-top:8px; width:100%;">تفعيل الرمز</button>
-        </div>
-      </div>
-
-      <div id="loginReadyBox">
-        <div class="form-group">
-          <label style="font-weight:700;">اسم المستخدم</label>
-          <select class="form-input" id="loginUser" style="font-size:16px; padding:14px;">
-            <option value="">— اختر حسابك —</option>
-            <option value="المسؤول">المسؤول (Admin)</option>
-            <option value="محارب">محارب</option>
-            <option value="ابو عمر">ابو عمر</option>
-            <option value="ابو طلال">ابو طلال</option>
-            <option value="تجربه 1">تجربه 1</option>
-            <option value="تجربه 2">تجربه 2</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label style="font-weight:700;">كلمة المرور</label>
-          <input type="password" class="form-input" id="loginPass" placeholder="أدخل كلمة المرور" style="font-size:16px; padding:14px;" onkeydown="if(event.key==='Enter')handleLogin()" />
-        </div>
-        <button class="btn btn-primary" onclick="handleLogin()" style="width:100%; padding:14px; font-size:16px; font-weight:700;" id="loginBtn">تسجيل الدخول</button>
-        <div id="loginError" style="color:var(--error); text-align:center; margin-top:12px; font-size:14px; font-weight:600; display:none;"></div>
-      </div>
-
-      <div style="text-align:center; margin-top:24px;">
-        <button class="btn btn-ghost" onclick="toggleTeamSetup()" id="teamSetupToggle" style="font-size:13px;">🔗 لدي رمز فريق</button>
-      </div>
-    </div>
-
-    <div class="copyright" style="margin-top:auto; padding-top:32px;">© MOHAMMED ALMUTAIRI</div>
-  </div>
-</div>
-
-<!-- HOME PAGE -->
-<div class="page" id="pgHome">
-  <div class="ptr-indicator" id="ptrInd"></div>
-
-  <div class="hero">
-    <div class="hero-title">مرحباً بك 👋</div>
-    <div class="hero-subtitle">جرد المكتبة v5 - إدارة مجموعتك بسهولة</div>
-    <div class="stats-grid">
-      <div class="stat-item">
-        <span class="stat-number" id="statTotal">0</span>
-        <span class="stat-label">إجمالي</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-number" id="statFound">0</span>
-        <span class="stat-label">موجود</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-number" id="statNotChecked">0</span>
-        <span class="stat-label">غير مفحوص</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-number" id="statNotFound">0</span>
-        <span class="stat-label">مفقود</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="search-box">
-    <span class="search-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span>
-    <input type="text" placeholder="ابحث عن كتاب..." id="homeSearch" onclick="nav('search')" />
-  </div>
-
-  <div class="quick-actions">
-    <div class="action-card highlight" onclick="nav('scan')">
-      <span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></span>
-      <div class="action-title">مسح الصورة</div>
-      <div class="action-subtitle">كاميرا + الذكاء الاصطناعي</div>
-    </div>
-    <div class="action-card" onclick="nav('add')">
-      <span class="action-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></span>
-      <div class="action-title">إضافة يدوية</div>
-      <div class="action-subtitle">أدخل البيانات</div>
-    </div>
-    <div class="action-card" onclick="nav('review')">
-      <span class="action-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><line x1="8" y1="10" x2="16" y2="10"></line><line x1="8" y1="14" x2="16" y2="14"></line><line x1="8" y1="18" x2="12" y2="18"></line></svg></span>
-      <div class="action-title">قائمة المراجعة</div>
-      <div class="action-subtitle">بانتظار التأكيد</div>
-    </div>
-    <div class="action-card" onclick="nav('import')">
-      <span class="action-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></span>
-      <div class="action-title">استيراد/تصدير</div>
-      <div class="action-subtitle">الملفات</div>
-    </div>
-    <div class="action-card" onclick="nav('reports')">
-      <span class="action-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg></span>
-      <div class="action-title">التقارير والإحصائيات</div>
-      <div class="action-subtitle">ملخص شامل</div>
-    </div>
-  </div>
-
-  <button class="btn btn-ghost" onclick="nav('allbooks')">📚 جميع الكتب</button>
-</div>
-
-<!-- REPORTS / STATISTICS PAGE (v3 20260410e) -->
-<div class="page" id="pgReports">
-  <div class="card" style="margin-bottom:16px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <h3 style="margin:0;">📊 ملخص المكتبة</h3>
-      <button class="btn btn-ghost" onclick="loadReports()" style="padding:6px 12px;font-size:13px;">🔄 تحديث</button>
-    </div>
-    <div id="reportsKpis" class="kpi-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
-      <div class="kpi" style="background:var(--primary-light);padding:14px;border-radius:10px;">
-        <div style="font-size:12px;color:var(--text-secondary);">إجمالي الكتب</div>
-        <div id="rptTotal" style="font-size:24px;font-weight:700;color:var(--primary);">—</div>
-      </div>
-      <div class="kpi" style="background:var(--success-light);padding:14px;border-radius:10px;">
-        <div style="font-size:12px;color:var(--text-secondary);">تم جردها</div>
-        <div id="rptFound" style="font-size:24px;font-weight:700;color:var(--success);">—</div>
-      </div>
-      <div class="kpi" style="background:var(--warning-light);padding:14px;border-radius:10px;">
-        <div style="font-size:12px;color:var(--text-secondary);">لم تُجرد بعد</div>
-        <div id="rptNotChecked" style="font-size:24px;font-weight:700;color:var(--warning);">—</div>
-      </div>
-      <div class="kpi" style="background:var(--error-light);padding:14px;border-radius:10px;">
-        <div style="font-size:12px;color:var(--text-secondary);">مفقودة</div>
-        <div id="rptLost" style="font-size:24px;font-weight:700;color:var(--error);">—</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px;">
-    <h3 style="margin:0 0 12px 0;">📂 حسب نوع المادة</h3>
-    <div id="rptByType" style="font-size:14px;line-height:1.8;color:var(--text);">—</div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px;">
-    <h3 style="margin:0 0 12px 0;">📍 حسب الموقع</h3>
-    <div id="rptByLocation" style="font-size:14px;line-height:1.8;color:var(--text);">—</div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px;">
-    <h3 style="margin:0 0 12px 0;">👥 نشاط المُجرِدين</h3>
-    <div id="rptByUser" style="font-size:14px;line-height:1.8;color:var(--text);">—</div>
-  </div>
-
-  <button class="btn btn-primary" onclick="exportBooks()" style="width:100%;margin-top:8px;">📥 تصدير كل البيانات (Excel)</button>
-</div>
-
-<!-- SEARCH PAGE -->
-<div class="page" id="pgSearch">
-  <div class="search-box">
-    <span class="search-icon">🔍</span>
-    <input type="text" placeholder="ابحث عن كتاب..." id="searchInput" onkeyup="doSearch()" autofocus />
-  </div>
-
-  <div class="filter-chips">
-    <button class="chip active" onclick="setSFilter('All')">الكل</button>
-    <button class="chip" onclick="setSFilter('Title')">العنوان</button>
-    <button class="chip" onclick="setSFilter('Author')">المؤلف</button>
-    <button class="chip" onclick="setSFilter('Publisher')">الناشر</button>
-  </div>
-
-  <div id="searchResults"></div>
-</div>
-
-<!-- SCAN PAGE -->
-<div class="page" id="pgScan">
-  <div class="scan-modes" id="scanModes">
-    <div class="scan-mode active" onclick="setScanMode('title')">
-      <span class="scan-mode-icon">📖</span>
-      <div class="scan-mode-name">صفحة العنوان</div>
-    </div>
-    <div class="scan-mode" onclick="setScanMode('copyright')">
-      <span class="scan-mode-icon">©️</span>
-      <div class="scan-mode-name">صفحة الحقوق</div>
-    </div>
-    <div class="scan-mode" onclick="setScanMode('spine')">
-      <span class="scan-mode-icon">📏</span>
-      <div class="scan-mode-name">الظهر</div>
-    </div>
-    <div class="scan-mode" onclick="setScanMode('cover')">
-      <span class="scan-mode-icon">📕</span>
-      <div class="scan-mode-name">الغلاف</div>
-    </div>
-  </div>
-
-  <div class="scan-hint" id="scanHint">💡 صور صفحة العنوان للنتائج الأفضل</div>
-
-  <div class="image-container">
-    <div class="image-placeholder" id="scanPH">
-      <div style="text-align: center; width: 100%;">
-        <div style="font-size: 40px; margin-bottom: 8px;">📸</div>
-        <div style="font-size: 13px; color: #94a3b8;">انقر أدناه لاختيار صورة</div>
-      </div>
-    </div>
-    <img id="prevImg" style="display: none;" />
-  </div>
-
-  <div class="btn-group">
-    <button class="btn btn-primary" onclick="$('cameraInput').click()"><span class="bnav-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></span> الكاميرا</button>
-    <button class="btn btn-ghost" onclick="$('fileInput').click()">📁 من الملفات</button>
-  </div>
-
-  <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display: none;" onchange="onImg(event)" />
-  <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="onImg(event)" />
-
-  <div class="loading-container" id="ocrLoad">
-    <div class="spinner"></div>
-    <div class="loading-text" id="ocrProgress">جاري معالجة الصورة...</div>
-    <div class="loading-method hidden" id="aiTag">AI Vision ✨</div>
-  </div>
-
-  <div id="ocrBox" style="display: none;">
-    <div class="card">
-      <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">البيانات المستخرجة:</div>
-      <div class="ocr-field">
-        <div class="ocr-label">العنوان</div>
-        <input type="text" class="form-input" id="ocT" placeholder="العنوان" />
-      </div>
-      <div class="ocr-field">
-        <div class="ocr-label">المؤلف</div>
-        <input type="text" class="form-input" id="ocA" placeholder="المؤلف" />
-      </div>
-      <div class="ocr-field">
-        <div class="ocr-label">الناشر</div>
-        <input type="text" class="form-input" id="ocP" placeholder="الناشر" />
-      </div>
-      <div class="ocr-field">
-        <div class="ocr-label">رقم التصنيف</div>
-        <input type="text" class="form-input" id="ocC" placeholder="رقم التصنيف" />
-      </div>
-      <div class="ocr-field">
-        <div class="ocr-label">ISBN</div>
-        <input type="text" class="form-input" id="ocI" placeholder="ISBN" />
-      </div>
-      <div class="ocr-field">
-        <div class="ocr-label">اللغة</div>
-        <input type="text" class="form-input" id="ocL" placeholder="اللغة" />
-      </div>
-    </div>
-    <div id="ocrRaw" style="font-size: 11px; color: var(--text-secondary); background: var(--bg); padding: 12px; border-radius: 12px; margin-bottom: 14px; min-height: 40px; display: none;"></div>
-    <button class="btn btn-primary" onclick="doMatch()">🔍 ابحث عن تطابقات</button>
-  </div>
-
-  <div id="matchBox" style="display: none;">
-    <div style="font-size: 14px; font-weight: 700; margin-bottom: 12px;">النتائج المقترحة:</div>
-    <div id="matchList"></div>
-  </div>
-</div>
-
-<!-- DETAIL PAGE -->
-<div class="page" id="pgDetail">
-  <div id="bookDet"></div>
-  <div id="bcDisp" style="display: none;"></div>
-</div>
-
-<!-- ADD BOOK PAGE -->
-<div class="page" id="pgAdd">
-  <div class="form-group">
-    <label>العنوان *</label>
-    <input type="text" class="form-input" id="aT" placeholder="العنوان" />
-  </div>
-  <div class="form-group">
-    <label>العنوان الفرعي</label>
-    <input type="text" class="form-input" id="aSt" placeholder="العنوان الفرعي" />
-  </div>
-  <div class="form-group">
-    <label>المؤلف</label>
-    <input type="text" class="form-input" id="aA" placeholder="المؤلف" />
-  </div>
-  <div class="form-group">
-    <label>اللغة</label>
-    <select class="form-input" id="aL">
-      <option value="">اختر اللغة</option>
-      <option value="Arabic">العربية</option>
-      <option value="English">الإنجليزية</option>
-      <option value="French">الفرنسية</option>
-      <option value="Other">أخرى</option>
-    </select>
-  </div>
-  <div class="form-group">
-    <label>الناشر</label>
-    <input type="text" class="form-input" id="aP" placeholder="الناشر" />
-  </div>
-  <div class="form-group">
-    <label>سنة النشر</label>
-    <input type="number" class="form-input" id="aY" placeholder="YYYY" />
-  </div>
-  <div class="form-group">
-    <label>ISBN</label>
-    <input type="text" class="form-input" id="aI" placeholder="ISBN" />
-  </div>
-  <div class="form-group">
-    <label>الموقع</label>
-    <input type="text" class="form-input" id="aLoc" placeholder="الموقع" />
-  </div>
-  <div class="form-group">
-    <label>الرف</label>
-    <input type="text" class="form-input" id="aSh" placeholder="الرف" />
-  </div>
-  <div class="btn-group">
-    <button class="btn btn-primary" onclick="addBook()">➕ إضافة الكتاب</button>
-    <button class="btn btn-ghost" onclick="goBack()">← رجوع</button>
-  </div>
-</div>
-
-<!-- REVIEW PAGE -->
-<div class="page" id="pgReview">
-  <div id="revList"></div>
-</div>
-
-<!-- ALL BOOKS PAGE -->
-<div class="page" id="pgAllBooks">
-  <div id="allList"></div>
-</div>
-
-<!-- IMPORT/EXPORT PAGE -->
-<div class="page" id="pgImport">
-  <div class="form-group">
-    <label>استيراد ملف Excel</label>
-    <input type="file" class="form-input" accept=".xlsx,.xls,.csv" onchange="startImport(event)" />
-  </div>
-  <div class="import-section" id="impBox"></div>
-
-  <div class="card">
-    <div style="margin-bottom: 12px;">
-      <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">الخيارات</div>
-      <button class="btn btn-primary btn-small" style="width: auto; margin-bottom: 8px;" onclick="exportBooks()">📤 تصدير Excel</button>
-      <button class="btn btn-error btn-small" style="width: auto;" onclick="clearAll()">🗑️ حذف الكل</button>
-    </div>
-  </div>
-</div>
-
-<!-- SETTINGS PAGE -->
-<div class="page" id="pgSettings">
-  <!-- Current User -->
-  <div class="settings-section">
-    <div style="display:flex; align-items:center; justify-content:space-between;">
-      <div>
-        <div style="font-weight:700; font-size:16px;" id="settingsUserName"></div>
-        <div style="font-size:13px; color:var(--text-secondary);" id="settingsUserRole"></div>
-      </div>
-      <button class="btn btn-ghost" onclick="handleLogout()" style="padding:8px 16px; font-size:13px;">🚪 خروج</button>
-    </div>
-  </div>
-
-  <!-- ADMIN-ONLY: API Keys -->
-  <div id="adminSettings" style="display:none;">
-    <div class="settings-section">
-      <div class="settings-title">Supabase</div>
-      <div class="form-group">
-        <label>رابط Supabase</label>
-        <input type="text" class="form-input" id="cfUrl" placeholder="https://xxx.supabase.co" />
-      </div>
-      <div class="form-group">
-        <label>مفتاح API</label>
-        <input type="text" class="form-input" id="cfKey" placeholder="anon key" />
-      </div>
-      <div class="form-group">
-        <label>اسم الجدول</label>
-        <input type="text" class="form-input" id="cfTable" placeholder="books" />
-      </div>
-    </div>
-
-    <div class="settings-section">
-      <div class="settings-title">OpenAI (الذكاء الاصطناعي)</div>
-      <div class="form-group">
-        <label>مفتاح API</label>
-        <input type="text" class="form-input" id="cfAI" placeholder="sk-..." />
-      </div>
-    </div>
-
-    <button class="btn btn-primary" onclick="testConn()" style="margin-bottom: 16px;">🔌 اختبار الاتصال</button>
-    <div id="cfStatus"></div>
-
-    <!-- Team Code for Admin -->
-    <div class="settings-section" style="margin-top:16px;">
-      <div class="settings-title">🔗 رمز الفريق</div>
-      <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">شارك هذا الرمز مع فريقك ليتمكنوا من الاتصال بقاعدة البيانات</p>
-      <div style="background:var(--bg); border-radius:8px; padding:12px; direction:ltr; text-align:center; font-family:monospace; font-size:11px; word-break:break-all; user-select:all; margin-bottom:8px;" id="teamCodeDisplay">—</div>
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="genTeamCode()">🔄 إنشاء الرمز</button>
-        <button class="btn btn-ghost" onclick="copyTeamCode()">📋 نسخ</button>
-      </div>
-    </div>
-
-    <div class="btn-group" style="margin-top:16px;">
-      <button class="btn btn-success" onclick="saveCfg()">💾 حفظ الإعدادات</button>
-    </div>
-
-    <!-- CONFIG DIAGNOSTIC PANEL -->
-    <div class="settings-section" style="margin-top: 20px;">
-      <div class="debug-panel">
-        <div class="debug-header" onclick="toggleDiag()">
-          <span class="debug-title">🔍 تشخيص الإعدادات</span>
-          <span class="debug-icon" id="diagIcon">▼</span>
-        </div>
-        <div class="debug-content" id="diagContent">
-          <div id="diagPanel" style="font-size: 13px; line-height: 1.8; direction: ltr; text-align: left;"></div>
-        </div>
-        <div class="debug-buttons">
-          <button class="btn btn-primary btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="loadDiagnostic()">🔄 تحديث</button>
-          <button class="btn btn-ghost btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="copyDiag()">📋 نسخ</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- DEBUG LOG PANEL -->
-    <div class="settings-section" style="margin-top: 12px;">
-      <div class="debug-panel">
-        <div class="debug-header" onclick="toggleDebug()">
-          <span class="debug-title">🐛 سجل التصحيح</span>
-          <span class="debug-icon">▼</span>
-        </div>
-        <div class="debug-content" id="debugContent">
-          <div id="debugLog"></div>
-        </div>
-        <div class="debug-buttons">
-          <button class="btn btn-primary btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="loadDebugLog()">🔄 تحديث</button>
-          <button class="btn btn-ghost btn-small" style="width: auto; flex: 1; padding: 8px 10px; font-size: 12px;" onclick="copyDebugLog()">📋 نسخ</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- NON-ADMIN: Connection Status -->
-  <div id="userSettings" style="display:none;">
-    <div class="settings-section">
-      <div class="settings-title">حالة الاتصال</div>
-      <div id="userConnStatus" style="font-size:14px; line-height:2;"></div>
-    </div>
-  </div>
-
-  <div class="copyright">© MOHAMMED ALMUTAIRI</div>
-</div>
-
-</div>
-
-<!-- BOTTOM NAVIGATION -->
-<nav class="bnav">
-  <button class="bnav-item active" onclick="nav('home')">
-    <span class="bnav-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></span>
-    <span class="bnav-label">الرئيسية</span>
-  </button>
-  <button class="bnav-item" onclick="nav('search')">
-    <span class="bnav-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span>
-    <span class="bnav-label">بحث</span>
-  </button>
-  <button class="bnav-item" onclick="nav('scan')">
-    <span class="bnav-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></span>
-    <span class="bnav-label">مسح</span>
-  </button>
-  <button class="bnav-item" onclick="nav('settings')">
-    <span class="bnav-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>
-    <span class="bnav-label">إعدادات</span>
-  </button>
-</nav>
-
-<script src="tesseract/tesseract.min.js"></script>
-<script src="lib/xlsx.full.min.js"></script>
-<script src="app.v5c.patch.js?v=20260410e"></script>
-<script src="app.v5c.js?v=20260408b"></script>
-
-<script>
-// ============ GLOBAL STATE ============
-// CONFIG is declared in app.js — do NOT redeclare here
-let curPage = 'home';
-let scanMode = 'title';
-let importFileRef = null;
-let importAnalysis = null;
-let searchFilter = 'All';
-let debugEntries = [];
-const MAX_DEBUG_ENTRIES = 50;
-
-function $(id) {
-  return document.getElementById(id);
-}
-
-// ============ LOG FUNCTION ============
-function addLog(category, message) {
-  const time = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const entry = { time, category, message };
-  debugEntries.unshift(entry);
-  if (debugEntries.length > MAX_DEBUG_ENTRIES) {
-    debugEntries.pop();
-  }
-  console.log(`[${category}] ${message}`);
-}
-
-// ============ NAVIGATION ============
-function nav(page) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-
-  const pageMap = {
-    login: 'pgLogin',
-    home: 'pgHome',
-    search: 'pgSearch',
-    scan: 'pgScan',
-    detail: 'pgDetail',
-    add: 'pgAdd',
-    review: 'pgReview',
-    allbooks: 'pgAllBooks',
-    import: 'pgImport',
-    reports: 'pgReports',
-    settings: 'pgSettings'
+  LOG('loading');
+
+  // Public debug surface
+  window.__patchStats = {
+    rowsSeen: 0,
+    keysCleaned: 0,
+    lastCleanedKeys: [],
+    debouncedPushes: 0,
+    realtimeRefreshes: 0,
+    localRefreshes: 0
   };
+  window.__patchErrors = [];   // first few non-2xx response bodies
+  window.__patchVersion = PATCH_VERSION;
+  var patchStats = window.__patchStats;
 
-  const targetPageId = pageMap[page];
-  if (targetPageId) {
-    const targetPage = $(targetPageId);
-    if (targetPage) {
-      targetPage.classList.add('active');
-    }
-  }
-
-  curPage = page;
-  updateNav();
-  updateHeader();
-
-  // Load page content
-  if (page === 'home') loadHome();
-  else if (page === 'search') {
-    setTimeout(() => {
-      const si = $('searchInput');
-      if (si) si.focus();
-    }, 100);
-    doSearch();
-  }
-  else if (page === 'review') loadReview();
-  else if (page === 'allbooks') loadAllBooks();
-  else if (page === 'reports') loadReports();
-  else if (page === 'settings') loadCfg();
-}
-
-function updateNav() {
-  document.querySelectorAll('.bnav-item').forEach(item => item.classList.remove('active'));
-  let navPage = curPage;
-  if (['detail', 'add', 'review', 'allbooks', 'import', 'reports'].includes(curPage)) {
-    navPage = 'home';
-  }
-  const navMap = { home: 0, search: 1, scan: 2, settings: 3 };
-  if (navMap[navPage] !== undefined) {
-    document.querySelectorAll('.bnav-item')[navMap[navPage]].classList.add('active');
-  }
-}
-
-function updateHeader() {
-  const titles = {
-    home: 'جرد المكتبة',
-    search: 'البحث',
-    scan: 'المسح الضوئي',
-    detail: 'تفاصيل الكتاب',
-    add: 'إضافة كتاب',
-    review: 'قائمة المراجعة',
-    allbooks: 'جميع الكتب',
-    import: 'الاستيراد والتصدير',
-    reports: 'التقارير والإحصائيات',
-    settings: 'الإعدادات'
-  };
-  $('hdrTitle').textContent = titles[curPage] || 'جرد المكتبة';
-
-  if (curPage !== 'home') {
-    $('hdrBack').classList.add('visible');
-  } else {
-    $('hdrBack').classList.remove('visible');
-  }
-}
-
-function goBack() {
-  if (curPage === 'detail') {
-    nav('search');
-  } else {
-    nav('home');
-  }
-}
-
-// ============ HOME PAGE ============
-async function loadHome() {
-  try {
-    const books = await dbAll();
-    const total = books.length;
-    const found = books.filter(b => b.inventory_status === 'Found').length;
-    const notChecked = books.filter(b => b.inventory_status === 'Not Checked').length;
-    const notFound = books.filter(b => b.inventory_status === 'Not Found').length;
-
-    $('statTotal').textContent = total;
-    $('statFound').textContent = found;
-    $('statNotChecked').textContent = notChecked;
-    $('statNotFound').textContent = notFound;
-
-    addLog('Home', `Loaded stats - Total: ${total}, Found: ${found}, NotChecked: ${notChecked}, NotFound: ${notFound}`);
-  } catch (err) {
-    addLog('Error', `Failed to load home: ${err.message}`);
-  }
-}
-
-// ============ SEARCH PAGE ============
-function setSFilter(filter) {
-  searchFilter = filter;
-  document.querySelectorAll('.filter-chips .chip').forEach((chip) => {
-    chip.classList.remove('active');
-  });
-  event.target.classList.add('active');
-  doSearch();
-}
-
-async function doSearch() {
-  const query = $('searchInput').value.trim().toLowerCase();
-  let results = [];
-
-  try {
-    if (query) {
-      const books = await dbAll();
-      results = books.filter(b => {
-        const title = (b.title || '').toLowerCase();
-        const author = (b.author || '').toLowerCase();
-        const publisher = (b.publisher || '').toLowerCase();
-
-        if (searchFilter === 'Title') return title.includes(query);
-        if (searchFilter === 'Author') return author.includes(query);
-        if (searchFilter === 'Publisher') return publisher.includes(query);
-        return title.includes(query) || author.includes(query) || publisher.includes(query);
-      });
-    }
-  } catch (err) {
-    addLog('Error', `Search failed: ${err.message}`);
-  }
-
-  const container = $('searchResults');
-  if (!results.length) {
-    container.innerHTML = query ? '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">لا توجد نتائج</div></div>' : '<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">ابدأ البحث</div></div>';
-    return;
-  }
-
-  container.innerHTML = results.map(b => `
-    <div class="card clickable" onclick="showDet(${b.record_id})">
-      <div class="card-title">${escapeHtml(b.title)}</div>
-      <div class="card-subtitle">${escapeHtml(b.author || '—')}</div>
-      <div class="card-meta">
-        <span>${b.publisher || '—'}</span>
-        <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
-      </div>
-      ${!b.internal_barcode && b.inventory_status !== 'Found' ? `
-        <button class="btn btn-success btn-small" style="margin-top: 10px; width: 100%;" onclick="cfDirect(${b.record_id}); event.stopPropagation();">✅ تأكيد</button>
-      ` : ''}
-    </div>
-  `).join('');
-}
-
-// ============ SCAN PAGE ============
-function setScanMode(mode) {
-  scanMode = mode;
-  const modeMap = {
-    title: '💡 صور صفحة العنوان للنتائج الأفضل',
-    copyright: '📄 صورة صفحة الحقوق (ترجمة، سنة النشر)',
-    spine: '📏 صورة ظهر الكتاب',
-    cover: '🎨 صورة غلاف الكتاب'
-  };
-  $('scanHint').textContent = modeMap[mode];
-
-  document.querySelectorAll('.scan-mode').forEach((el) => {
-    el.classList.remove('active');
-  });
-  event.target.closest('.scan-mode').classList.add('active');
-}
-
-function onImg(e) {
-  const f = e.target.files[0];
-  if (!f) return;
-
-  const reader = new FileReader();
-  reader.onload = ev => {
-    $('prevImg').src = ev.target.result;
-    $('prevImg').style.display = 'block';
-    $('scanPH').style.display = 'none';
-    startAnalysis(ev.target.result);
-    addLog('Scan', `Image selected, starting analysis`);
-  };
-  reader.readAsDataURL(f);
-  e.target.value = '';
-}
-
-async function startAnalysis(imgData) {
-  $('ocrLoad').classList.add('show');
-  $('ocrBox').style.display = 'none';
-  $('matchBox').style.display = 'none';
-
-  let fields = null;
-
-  // Use unified analyzeImage from app.js (tries AI first, then OCR)
-  try {
-    const result = await analyzeImage(imgData, scanMode, (stage, msg) => {
-      $('ocrProgress').textContent = msg;
-      if (stage === 'ai_start') $('aiTag').classList.remove('hidden');
-      if (stage === 'ai_failed' || stage === 'ocr_start') $('aiTag').classList.add('hidden');
-      if (stage === 'ai_success') $('aiTag').classList.remove('hidden');
-    });
-
-    if (result.success && result.fields) {
-      fields = result.fields;
-      if (result.rawText) $('ocrRaw').textContent = result.rawText;
-      else $('ocrRaw').textContent = `[${result.method}] تم الاستخراج بنجاح`;
-      addLog(result.method === 'ai_vision' ? 'AI Vision' : 'OCR', `Extracted: ${fields.title || '(no title)'}`);
-    } else {
-      // Both AI and OCR failed
-      $('ocrLoad').classList.remove('show');
-      $('ocrBox').style.display = 'block';
-      $('ocrRaw').innerHTML = '<span style="color: var(--error);">⚠️ فشل التحليل — ابحث يدوياً</span>';
-      if (result.rawText) $('ocrRaw').textContent = result.rawText + '\n⚠️ لم يتم استخراج بيانات واضحة';
-      // Still populate partial fields if available
-      if (result.fields) fields = result.fields;
-      else { ['ocT', 'ocA', 'ocP', 'ocC', 'ocI'].forEach(id => $(id).value = ''); }
-      showToast('⚠️ فشل التحليل — استخدم البحث اليدوي');
-      addLog('Error', `Analysis failed: ${result.error}`);
-      if (!fields) return;
-    }
-  } catch (err) {
-    $('ocrLoad').classList.remove('show');
-    $('ocrBox').style.display = 'block';
-    $('ocrRaw').innerHTML = `<span style="color: var(--error);">⚠️ خطأ: ${escapeHtml(err.message)}</span>`;
-    ['ocT', 'ocA', 'ocP', 'ocC', 'ocI'].forEach(id => $(id).value = '');
-    showToast('⚠️ خطأ في التحليل');
-    addLog('Error', `Analysis exception: ${err.message}`);
-    return;
-  }
-
-  $('ocrLoad').classList.remove('show');
-  $('ocrBox').style.display = 'block';
-  $('ocT').value = fields.title;
-  $('ocA').value = fields.author;
-  $('ocP').value = fields.publisher;
-  $('ocC').value = fields.callNum;
-  $('ocI').value = fields.isbn;
-  $('ocL').value = fields.language;
-
-  if (!fields.title && !fields.callNum && !fields.isbn) {
-    showToast('⚠️ بيانات ضعيفة — جرّب البحث');
-  }
-}
-
-async function doMatch() {
-  const data = {
-    title: $('ocT').value,
-    author: $('ocA').value,
-    publisher: $('ocP').value,
-    call_number: $('ocC').value,
-    isbn: $('ocI').value,
-    language: $('ocL').value
-  };
-
-  if (!data.title && !data.call_number && !data.isbn) {
-    showToast('أدخل العنوان أو ISBN');
-    return;
-  }
-
-  const matches = await matchBooks(data);
-  $('matchBox').style.display = 'block';
-  const good = matches.filter(m => m.confidence > 5);
-
-  if (!good.length) {
-    $('matchList').innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">🤷</div>
-        <div class="empty-text">لا توجد تطابقات</div>
-      </div>
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="nav('search')">🔍 بحث يدوي</button>
-        <button class="btn btn-ghost" onclick="nav('add')">➕ إضافة جديدة</button>
-        <button class="btn btn-warning" onclick="resetScan()">🔄 إعادة</button>
-      </div>
-    `;
-    return;
-  }
-
-  $('matchList').innerHTML = good.map((m, i) => {
-    const confColor = m.confidence >= 70 ? 'var(--success)' : m.confidence >= 40 ? 'var(--warning)' : 'var(--error)';
-    const confClass = m.confidence >= 70 ? 'confidence-90' : m.confidence >= 40 ? 'confidence-50' : 'confidence-below';
-
-    return `
-      <div class="match-card ${i === 0 && m.confidence >= 50 ? 'best' : ''}">
-        ${i === 0 && m.confidence >= 50 ? '<div class="match-badge">أفضل تطابق</div>' : ''}
-        <div class="match-title">${escapeHtml(m.book.title)}</div>
-        ${m.book.subtitle ? `<div class="match-subtitle">${escapeHtml(m.book.subtitle)}</div>` : ''}
-        <div class="match-meta">
-          <span class="match-label">المؤلف:</span>
-          <span>${escapeHtml(m.book.author || '—')}</span>
-        </div>
-        ${m.book.publisher ? `<div class="match-meta"><span class="match-label">الناشر:</span><span>${escapeHtml(m.book.publisher)}</span></div>` : ''}
-        ${m.book.isbn ? `<div class="match-meta"><span class="match-label">ISBN:</span><span style="direction:ltr;font-family:monospace;">${escapeHtml(m.book.isbn)}</span></div>` : ''}
-        ${m.book.full_call_number ? `<div class="match-meta"><span class="match-label">رقم التصنيف:</span><span style="direction:ltr;font-family:monospace;">${escapeHtml(m.book.full_call_number)}</span></div>` : ''}
-        ${m.book.language ? `<div class="match-meta"><span class="match-label">اللغة:</span><span>${escapeHtml(m.book.language)}</span></div>` : ''}
-        ${m.book.location ? `<div class="match-meta"><span class="match-label">الموقع:</span><span>${escapeHtml(m.book.location)}</span></div>` : ''}
-        <div class="match-meta"><span class="match-label">الحالة:</span><span class="badge ${statusBadgeClass(m.book.inventory_status)}" style="font-size:11px;padding:2px 8px;">${statusAr(m.book.inventory_status)}</span></div>
-        <div class="match-meta">
-          <span class="match-label">التطابق:</span>
-          <span style="font-weight: 800; color: ${confColor};">${m.confidence}%</span>
-        </div>
-        <div class="confidence-bar">
-          <div class="confidence-fill ${confClass}" style="width: ${m.confidence}%;"></div>
-        </div>
-        <div class="match-breakdown">
-          <span>العنوان ${m.breakdown.title}%</span>
-          <span>المؤلف ${m.breakdown.author}%</span>
-          ${m.breakdown.isbn ? '<span>ISBN ✅</span>' : ''}
-        </div>
-        <div class="btn-group" style="margin-top: 10px;">
-          <button class="btn btn-success" onclick="cfBook(${m.book.record_id}, ${m.confidence}, 'OCR')">✅ تأكيد</button>
-          <div class="btn-row">
-            <button class="btn btn-warning btn-small" onclick="toReview(${m.book.record_id})">📋 مراجعة</button>
-            <button class="btn btn-ghost btn-small" onclick="resetScan()">🔄 جديد</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('') + '<div class="btn-group"><button class="btn btn-primary" onclick="nav(\'search\')">🔍 بحث يدوي</button></div>';
-
-  $('matchBox').scrollIntoView({ behavior: 'smooth' });
-}
-
-function resetScan() {
-  $('prevImg').style.display = 'none';
-  $('prevImg').src = '';
-  $('scanPH').style.display = 'flex';
-  $('ocrBox').style.display = 'none';
-  $('matchBox').style.display = 'none';
-  $('ocrLoad').classList.remove('show');
-  ['ocT', 'ocA', 'ocP', 'ocC', 'ocI', 'ocL'].forEach(id => $(id).value = '');
-  $('ocrRaw').textContent = '';
-  $('ocrProgress').textContent = '';
-  $('aiTag').classList.add('hidden');
-  $('cameraInput').value = '';
-  $('fileInput').value = '';
-  addLog('Scan', 'Reset all scan state');
-}
-
-// ============ CONFIRM ============
-async function cfBook(id, conf, method) {
-  const b = await confirmBook(id, conf, method);
-  if (!b) return;
-  // --- SYNC FIX: Handle already-inventoried conflict ---
-  if (b.alreadyInventoried) {
-    showToast(`⚠️ تم جرده من قبل: ${b.inventoried_by}`, 4000);
-    // Refresh from cloud to get latest state
-    await pullFromCloud();
-    showDet(id);
-    return;
-  }
-  showToast(`✅ ${b.title} — ${b.internal_barcode}`);
-  setTimeout(fullSync, 500);
-  resetScan();
-  showDet(id);
-}
-
-async function cfDirect(id) {
-  const b = await confirmBook(id, 100, 'Search');
-  if (!b) return;
-  // --- SYNC FIX: Handle already-inventoried conflict ---
-  if (b.alreadyInventoried) {
-    showToast(`⚠️ تم جرده من قبل: ${b.inventoried_by}`, 4000);
-    await pullFromCloud();
-    doSearch();
-    return;
-  }
-  showToast(`✅ ${b.title} — ${b.internal_barcode}`);
-  setTimeout(fullSync, 500);
-  doSearch();
-}
-
-async function toReview(id) {
-  const b = await dbGet(id);
-  if (b) {
-    b.review_status = 'Needs Review';
-    b.notes = (b.notes || '') + ' مراجعة';
-    await dbPut(b);
-    showToast('📋 للمراجعة');
-    addLog('Review', `Marked ${b.title} for review`);
-  }
-}
-
-async function markNF(id) {
-  if (!confirm('هل الكتاب غير موجود؟')) return;
-  const b = await dbGet(id);
-  b.inventory_status = 'Not Found';
-  b.last_inventory_date = new Date().toISOString().split('T')[0];
-  b.review_status = 'Confirmed';
-  await dbPut(b);
-  showToast('✅ تم');
-  setTimeout(fullSync, 500);
-  showDet(id);
-  addLog('Inventory', `Marked ${b.title} as Not Found`);
-}
-
-// ============ DETAIL PAGE ============
-async function showDet(id) {
-  nav('detail');
-  const b = await dbGet(id);
-  if (!b) {
-    $('bookDet').innerHTML = '<div class="empty-state"><div class="empty-text">الكتاب غير موجود</div></div>';
-    return;
-  }
-
-  const fields = [
-    ['رقم المكتبة', b.bib],
-    ['رقم التصنيف', b.doctype],
-    ['العنوان', b.title],
-    ['العنوان الفرعي', b.subtitle],
-    ['المؤلف', b.author],
-    ['اللغة', b.language],
-    ['الناشر', b.publisher],
-    ['تاريخ النشر', b.pubdate],
-    ['مكان النشر', b.pubplace],
-    ['سنة النشر', b.publication_year],
-    ['ISBN', b.isbn],
-    ['رقم ديوي', b.diwi],
-    ['رقم التصنيف الكامل', b.full_call_number],
-    ['المواضيع', b.subjects],
-    ['الطبعة', b.edition],
-    ['الوصف المادي', b.descriptions],
-    ['الملاحظات', b.notes],
-    ['الموقع', b.location],
-    ['الرف', b.shelf],
-    ['قاعدة المصدر', b.source_db]
-  ].filter(f => f[1]);
-
-  $('bookDet').innerHTML = `
-    <div class="card">
-      <div class="card-title" style="font-size: 18px; margin-bottom: 8px;">${escapeHtml(b.title)}</div>
-      ${b.subtitle ? `<div class="card-subtitle" style="margin-bottom: 12px;">${escapeHtml(b.subtitle)}</div>` : ''}
-      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0;">
-        <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
-        ${b.internal_barcode ? `<span class="badge" style="font-family: monospace; direction: ltr;">${escapeHtml(b.internal_barcode)}</span>` : ''}
-      </div>
-      <div class="detail-fields">
-        ${fields.map(f => `
-          <div class="detail-field">
-            <div class="detail-label">${f[0]}</div>
-            <div class="detail-value">${escapeHtml(String(f[1]))}</div>
-          </div>
-        `).join('')}
-        ${b.last_inventory_date ? `
-          <div class="detail-field">
-            <div class="detail-label">تاريخ الجرد</div>
-            <div class="detail-value">${b.last_inventory_date}</div>
-          </div>
-        ` : ''}
-        ${b.inventoried_by ? `
-          <div class="detail-field">
-            <div class="detail-label">تم جرده بواسطة</div>
-            <div class="detail-value" style="color: var(--success); font-weight: 600;">${escapeHtml(b.inventoried_by)}</div>
-          </div>
-        ` : ''}
-        ${b.match_method ? `
-          <div class="detail-field">
-            <div class="detail-label">طريقة المطابقة</div>
-            <div class="detail-value">${b.match_method} (${b.match_confidence}%)</div>
-          </div>
-        ` : ''}
-      </div>
-    </div>
-    <div class="btn-group">
-      ${b.internal_barcode ? `<button class="btn btn-primary" onclick="showBC('${escapeHtml(b.internal_barcode)}')">📊 الباركود</button>` : ''}
-      ${b.inventory_status !== 'Found' ? `<button class="btn btn-success" onclick="cfDirect(${b.record_id})">✅ تأكيد</button>` : ''}
-      <button class="btn btn-error" onclick="markNF(${b.record_id})">❌ غير موجود</button>
-      <button class="btn btn-ghost" onclick="goBack()">← رجوع</button>
-    </div>
-  `;
-}
-
-function showBC(code) {
-  $('bookDet').innerHTML = `
-    <div class="card">
-      <div class="barcode-display" style="text-align:center; padding:24px;">
-        <canvas id="bcCanvas" style="max-width:100%; height:auto;"></canvas>
-        <div class="barcode-text" style="font-family:monospace; font-size:18px; font-weight:700; margin-top:12px; letter-spacing:4px;">${escapeHtml(code)}</div>
-      </div>
-    </div>
-    <div class="btn-group">
-      <button class="btn btn-primary" onclick="downloadBarcode()">📥 تحميل الباركود</button>
-      <button class="btn btn-ghost" onclick="goBack()">← رجوع</button>
-    </div>
-  `;
-  drawBarcode('bcCanvas', code);
-}
-
-function drawBarcode(canvasId, text) {
-  // Code128B barcode generator
-  var CODE128B = [
-    [2,1,2,2,2,2],[2,2,2,1,2,2],[2,2,2,2,2,1],[1,2,1,2,2,3],[1,2,1,3,2,2],
-    [1,3,1,2,2,2],[1,2,2,2,1,3],[1,2,2,3,1,2],[1,3,2,2,1,2],[2,2,1,2,1,3],
-    [2,2,1,3,1,2],[2,3,1,2,1,2],[1,1,2,2,3,2],[1,2,2,1,3,2],[1,2,2,2,3,1],
-    [1,1,3,2,2,2],[1,2,3,1,2,2],[1,2,3,2,2,1],[2,2,3,2,1,1],[2,2,1,1,3,2],
-    [2,2,1,2,3,1],[2,1,3,2,1,2],[2,2,3,1,1,2],[3,1,2,1,3,1],[3,1,1,2,2,2],
-    [3,2,1,1,2,2],[3,2,1,2,2,1],[3,1,2,2,1,2],[3,2,2,1,1,2],[3,2,2,2,1,1],
-    [2,1,2,1,2,3],[2,1,2,3,2,1],[2,3,2,1,2,1],[1,1,1,3,2,3],[1,3,1,1,2,3],
-    [1,3,1,3,2,1],[1,1,2,3,1,3],[1,3,2,1,1,3],[1,3,2,3,1,1],[2,1,1,3,1,3],
-    [2,3,1,1,1,3],[2,3,1,3,1,1],[1,1,2,1,3,3],[1,1,2,3,3,1],[1,3,2,1,3,1],
-    [1,1,3,1,2,3],[1,1,3,3,2,1],[1,3,3,1,2,1],[3,1,3,1,2,1],[2,1,1,3,3,1],
-    [2,3,1,1,3,1],[2,1,3,1,1,3],[2,1,3,3,1,1],[2,1,3,1,3,1],[3,1,1,1,2,3],
-    [3,1,1,3,2,1],[3,3,1,1,2,1],[3,1,2,1,1,3],[3,1,2,3,1,1],[3,3,2,1,1,1],
-    [3,1,4,1,1,1],[2,2,1,4,1,1],[4,3,1,1,1,1],[1,1,1,2,2,4],[1,1,1,4,2,2],
-    [1,2,1,1,2,4],[1,2,1,4,2,1],[1,4,1,1,2,2],[1,4,1,2,2,1],[1,1,2,2,1,4],
-    [1,1,2,4,1,2],[1,2,2,1,1,4],[1,2,2,4,1,1],[1,4,2,1,1,2],[1,4,2,2,1,1],
-    [2,4,1,2,1,1],[2,2,1,1,1,4],[4,1,3,1,1,1],[2,4,1,1,1,2],[1,3,4,1,1,1],
-    [1,1,1,2,4,2],[1,2,1,1,4,2],[1,2,1,2,4,1],[1,1,4,2,1,2],[1,2,4,1,1,2],
-    [1,2,4,2,1,1],[4,1,1,2,1,2],[4,2,1,1,1,2],[4,2,1,2,1,1],[2,1,2,1,4,1],
-    [2,1,4,1,2,1],[4,1,2,1,2,1],[1,1,1,1,4,3],[1,1,1,3,4,1],[1,3,1,1,4,1],
-    [1,1,4,1,1,3],[1,1,4,3,1,1],[4,1,1,1,1,3],[4,1,1,3,1,1],[1,1,3,1,4,1],
-    [1,1,4,1,3,1],[3,1,1,1,4,1],[4,1,1,1,3,1],[2,1,1,4,1,2],[2,1,1,2,1,4],
-    [2,1,1,2,3,2],[2,3,3,1,1,1,2]
-  ];
-
-  var STARTB = 104;
-  var STOP = 106;
-
-  var codes = [STARTB];
-  var checksum = STARTB;
-  for (var i = 0; i < text.length; i++) {
-    var val = text.charCodeAt(i) - 32;
-    codes.push(val);
-    checksum += val * (i + 1);
-  }
-  codes.push(checksum % 103);
-  codes.push(STOP);
-
-  // Calculate total width
-  var barWidth = 2;
-  var totalWidth = 20; // quiet zones
-  for (var c = 0; c < codes.length; c++) {
-    var pattern = CODE128B[codes[c]];
-    for (var p = 0; p < pattern.length; p++) totalWidth += pattern[p] * barWidth;
-  }
-
-  var canvas = document.getElementById(canvasId);
-  var height = 120;
-  canvas.width = totalWidth;
-  canvas.height = height + 10;
-  var ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  var x = 10; // quiet zone
-  for (var c = 0; c < codes.length; c++) {
-    var pattern = CODE128B[codes[c]];
-    for (var p = 0; p < pattern.length; p++) {
-      if (p % 2 === 0) { // even = bar (black)
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x, 0, pattern[p] * barWidth, height);
+  /* -----------------------------------------------------------
+     ONE-SHOT LOCAL RESET (v3.1, 20260410f)
+     Wipes the local `books` and `sync_queue` stores ONCE on the
+     first load of this patch version per browser. After the
+     marker is set in localStorage, this block is a no-op.
+     ----------------------------------------------------------- */
+  (function oneShotLocalReset() {
+    try {
+      var marker = null;
+      try { marker = localStorage.getItem('lib_reset_marker'); } catch (e) {}
+      if (marker === RESET_MARKER) {
+        LOG('reset-local already applied, skipping');
+        return;
       }
-      x += pattern[p] * barWidth;
+      LOG('reset-local: marker missing or stale, wiping local stores');
+      var req = indexedDB.open('LibraryInventoryDB');
+      req.onsuccess = function () {
+        try {
+          var db = req.result;
+          var stores = [];
+          if (db.objectStoreNames.contains('books'))      stores.push('books');
+          if (db.objectStoreNames.contains('sync_queue')) stores.push('sync_queue');
+          if (stores.length === 0) {
+            try { localStorage.setItem('lib_reset_marker', RESET_MARKER); } catch (e) {}
+            db.close();
+            LOG('reset-local: no target stores present, marker set');
+            return;
+          }
+          var tx = db.transaction(stores, 'readwrite');
+          stores.forEach(function (name) {
+            try {
+              var st = tx.objectStore(name);
+              var countReq = st.count();
+              countReq.onsuccess = function () {
+                var n = countReq.result || 0;
+                st.clear();
+                LOG('reset-local: cleared store ' + name + ' (' + n + ' rows)');
+              };
+            } catch (e) { WARN('reset-local clear error for ' + name + ':', e && e.message); }
+          });
+          tx.oncomplete = function () {
+            try { localStorage.setItem('lib_reset_marker', RESET_MARKER); } catch (e) {}
+            LOG('reset-local: complete, marker set to ' + RESET_MARKER);
+            db.close();
+          };
+          tx.onerror = function () {
+            WARN('reset-local: tx error, marker NOT set');
+            try { db.close(); } catch (e) {}
+          };
+        } catch (e) { WARN('reset-local inner error:', e && e.message); }
+      };
+      req.onerror = function () { WARN('reset-local: IDB open error'); };
+    } catch (e) { WARN('reset-local outer error:', e && e.message); }
+  })();
+
+  /* -----------------------------------------------------------
+     BUG 4: Nuke stale sync_queue on startup
+     ----------------------------------------------------------- */
+  (function nukeStaleQueue() {
+    try {
+      var req = indexedDB.open('LibraryInventoryDB');
+      req.onsuccess = function () {
+        try {
+          var db = req.result;
+          if (!db.objectStoreNames.contains('sync_queue')) {
+            db.close();
+            LOG('sync_queue store not present, skip nuke');
+            return;
+          }
+          var tx = db.transaction('sync_queue', 'readwrite');
+          var store = tx.objectStore('sync_queue');
+          var countReq = store.count();
+          countReq.onsuccess = function () {
+            var n = countReq.result || 0;
+            if (n > 0) {
+              store.clear();
+              LOG('nuked sync_queue (' + n + ' stale rows)');
+            } else {
+              LOG('sync_queue already empty');
+            }
+          };
+          tx.oncomplete = function () { db.close(); };
+          tx.onerror = function () { try { db.close(); } catch (e) {} };
+        } catch (e) { WARN('nuke tx error:', e && e.message); }
+      };
+      req.onerror = function () {
+        WARN('nuke IDB open error');
+      };
+    } catch (e) { WARN('nuke outer error:', e && e.message); }
+  })();
+
+  /* -----------------------------------------------------------
+     BUG 2: convert ALL empty strings to null
+     ----------------------------------------------------------- */
+  function cleanRow(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    patchStats.rowsSeen++;
+    for (var k in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+      if (obj[k] === '') {
+        obj[k] = null;
+        patchStats.keysCleaned++;
+        if (patchStats.lastCleanedKeys.length < 30 &&
+            patchStats.lastCleanedKeys.indexOf(k) === -1) {
+          patchStats.lastCleanedKeys.push(k);
+        }
+      }
+    }
+    return obj;
+  }
+
+  function cleanPayload(data) {
+    if (Array.isArray(data)) {
+      for (var i = 0; i < data.length; i++) cleanRow(data[i]);
+    } else {
+      cleanRow(data);
+    }
+    return data;
+  }
+
+  /* -----------------------------------------------------------
+     BUG 3: rate-limit push failures
+     ----------------------------------------------------------- */
+  var FAIL_BURST     = 500;
+  var FAIL_WINDOW_MS = 60 * 1000;
+  var COOLDOWN_MS    = 2 * 60 * 1000;
+  var failTimestamps = [];
+  var cooldownUntil  = 0;
+
+  function recordFailure() {
+    var now = Date.now();
+    failTimestamps.push(now);
+    while (failTimestamps.length && failTimestamps[0] < now - FAIL_WINDOW_MS) {
+      failTimestamps.shift();
+    }
+    if (failTimestamps.length >= FAIL_BURST && cooldownUntil < now) {
+      cooldownUntil = now + COOLDOWN_MS;
+      WARN('push failure burst detected (' + failTimestamps.length +
+           ' in ' + FAIL_WINDOW_MS + 'ms) — suspending writes for ' +
+           (COOLDOWN_MS / 1000) + 's');
     }
   }
-}
+  function inCooldown() { return Date.now() < cooldownUntil; }
 
-function downloadBarcode() {
-  var canvas = document.getElementById('bcCanvas');
-  if (!canvas) return;
-  var link = document.createElement('a');
-  link.download = 'barcode.png';
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-}
+  window.__patchResetCooldown = function () {
+    cooldownUntil = 0;
+    failTimestamps = [];
+    LOG('cooldown manually cleared');
+  };
 
-// ============ ADD BOOK PAGE ============
-async function addBook() {
-  const t = $('aT').value.trim();
-  if (!t) {
-    showToast('العنوان مطلوب');
-    return;
+  /* -----------------------------------------------------------
+     V3 NEW: UI refresh helpers
+     ----------------------------------------------------------- */
+  var uiRefreshDebounce = null;
+  function scheduleUIRefresh(source) {
+    clearTimeout(uiRefreshDebounce);
+    uiRefreshDebounce = setTimeout(function () {
+      try {
+        // Refresh whichever render hooks the app exposes
+        var fns = ['loadHome', 'renderHome', 'loadAllBooks', 'refreshUI', 'renderBooks', 'updateSyncBadge'];
+        var called = 0;
+        for (var i = 0; i < fns.length; i++) {
+          var fn = window[fns[i]];
+          if (typeof fn === 'function') {
+            try { fn(); called++; } catch (e) {}
+          }
+        }
+        if (source === 'realtime') patchStats.realtimeRefreshes++;
+        else patchStats.localRefreshes++;
+        LOG('UI refresh (' + source + ') → called ' + called + ' render fn(s)');
+      } catch (e) { WARN('UI refresh error:', e && e.message); }
+    }, 200);
   }
 
-  const b = await dbAdd({
-    title: t,
-    subtitle: $('aSt').value.trim(),
-    author: $('aA').value.trim(),
-    additional_author: '',
-    language: $('aL').value,
-    publisher: $('aP').value.trim(),
-    publication_year: $('aY').value,
-    isbn: $('aI').value.trim(),
-    dewey_number: '',
-    cutter_number: '',
-    full_call_number: '',
-    material_type: 'Book',
-    inventory_status: 'Not Checked',
-    condition: 'Good',
-    location: $('aLoc').value.trim(),
-    shelf: $('aSh').value.trim(),
-    notes: '',
-    internal_barcode: '',
-    last_inventory_date: '',
-    match_confidence: '',
-    match_method: '',
-    review_status: 'Pending',
-    cover_image_name: '',
-    added_by: currentUser ? currentUser.name : 'غير معروف',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  });
-
-  showToast('✅ تم');
-  setTimeout(fullSync, 500);
-  ['aT', 'aSt', 'aA', 'aP', 'aY', 'aI', 'aLoc', 'aSh'].forEach(id => $(id).value = '');
-  $('aL').value = '';
-  showDet(b.record_id);
-  addLog('Add', `Added new book: ${t}`);
-}
-
-// ============ REVIEW / ALL BOOKS ============
-async function loadReview() {
-  const books = await dbAll();
-  const filtered = books.filter(x => x.review_status === 'Needs Review' || x.review_status === 'Pending' || x.inventory_status === 'Not Checked');
-  renderList(filtered, 'revList');
-}
-
-async function loadAllBooks() {
-  const books = await dbAll();
-  renderList(books, 'allList');
-}
-
-function renderList(books, cid) {
-  const c = $(cid);
-  if (!books.length) {
-    c.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">لا توجد كتب</div></div>';
-    return;
+  /* -----------------------------------------------------------
+     V3 NEW: debounced push-to-cloud after queueSync
+     ----------------------------------------------------------- */
+  var pushDebounce = null;
+  function schedulePush() {
+    clearTimeout(pushDebounce);
+    pushDebounce = setTimeout(function () {
+      try {
+        if (inCooldown()) {
+          WARN('skipping debounced push: cooldown active');
+          return;
+        }
+        if (typeof window.pushToCloud === 'function') {
+          patchStats.debouncedPushes++;
+          LOG('debounced pushToCloud() firing');
+          Promise.resolve(window.pushToCloud())
+            .then(function () {
+              // After the push, also refresh THIS tab's UI so admin
+              // sees their own imports reflected immediately.
+              scheduleUIRefresh('local-after-push');
+              // And pull the latest (catches server-side triggers)
+              if (typeof window.pullFromCloud === 'function') {
+                return window.pullFromCloud();
+              }
+            })
+            .then(function () { scheduleUIRefresh('local-after-pull'); })
+            .catch(function (e) { WARN('debounced push error:', e && e.message); });
+        }
+      } catch (e) { WARN('schedulePush error:', e && e.message); }
+    }, 400);
   }
 
-  c.innerHTML = books.map(b => `
-    <div class="card clickable" onclick="showDet(${b.record_id})">
-      <div style="display: flex; justify-content: space-between; align-items: start;">
-        <div style="flex: 1;">
-          <div class="card-title">${escapeHtml(b.title)}</div>
-          <div class="card-subtitle">${escapeHtml(b.author || '—')}</div>
-          <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: 11px; color: var(--text-secondary);">
-            ${b.bib ? `<span>📖 ${escapeHtml(String(b.bib))}</span>` : ''}
-            ${b.publisher ? `<span>🏢 ${escapeHtml(b.publisher)}</span>` : ''}
-            ${b.pubdate ? `<span>📅 ${escapeHtml(b.pubdate)}</span>` : ''}
-            ${b.subjects ? `<span>📚 ${escapeHtml(b.subjects.length > 40 ? b.subjects.substring(0, 40) + '...' : b.subjects)}</span>` : ''}
-          </div>
-        </div>
-        <span class="badge ${statusBadgeClass(b.inventory_status)}">${statusAr(b.inventory_status)}</span>
-      </div>
-    </div>
-  `).join('');
-}
+  // Public: force immediate flush (used by tests)
+  window.__patchFlushQueue = function () {
+    clearTimeout(pushDebounce);
+    if (typeof window.pushToCloud !== 'function') {
+      LOG('__patchFlushQueue: pushToCloud not available');
+      return Promise.resolve(false);
+    }
+    LOG('__patchFlushQueue: manual flush');
+    return Promise.resolve(window.pushToCloud())
+      .then(function () {
+        scheduleUIRefresh('manual');
+        return true;
+      })
+      .catch(function (e) { WARN('manual flush error:', e && e.message); return false; });
+  };
 
-// ============ IMPORT/EXPORT ============
-async function startImport(e) {
-  const f = e.target.files[0];
-  if (!f) return;
+  /* -----------------------------------------------------------
+     Fetch wrapper (cleanPayload + errors + post-write refresh)
+     ----------------------------------------------------------- */
+  var origFetch = window.fetch && window.fetch.bind(window);
+  if (!origFetch) {
+    WARN('window.fetch not found — cannot install patch');
+  } else {
+    window.fetch = function patchedFetch(input, init) {
+      var url = '';
+      var method = 'GET';
+      try {
+        url = typeof input === 'string'
+          ? input
+          : (input && typeof input.url === 'string' ? input.url : '');
+        method = (init && init.method) ||
+                 (input && input.method) || 'GET';
+      } catch (e) {}
+      var isRest  = url.indexOf('/rest/v1/') !== -1;
+      var isBooks = isRest && url.indexOf('/books') !== -1;
+      var isWrite = isRest && (method === 'POST' || method === 'PATCH' ||
+                               method === 'PUT' || method === 'DELETE');
 
-  importFileRef = f;
-  e.target.value = '';
+      if (isWrite && method !== 'DELETE' && inCooldown()) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ patch: 'cooldown', suppressed: true }),
+          { status: 503, headers: { 'content-type': 'application/json' } }
+        ));
+      }
 
-  const box = $('impBox');
-  box.classList.add('show');
-  box.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">تحليل الملف...</div></div>';
+      // Clean the body if it's a JSON string
+      if (isWrite && init && typeof init.body === 'string' && init.body.length) {
+        try {
+          var first = init.body.charAt(0);
+          if (first === '{' || first === '[') {
+            var data = JSON.parse(init.body);
+            cleanPayload(data);
+            init = Object.assign({}, init, { body: JSON.stringify(data) });
+          }
+        } catch (e) {}
+      }
 
-  try {
-    importAnalysis = await analyzeColumns(f);
-    const { headers, sample, autoMap, totalRows } = importAnalysis;
-    const fields = ['bib', 'doctype', 'title', 'subtitle', 'author', 'language', 'publisher', 'pubdate', 'pubplace', 'publication_year', 'isbn', 'diwi', 'full_call_number', 'subjects', 'edition', 'descriptions', 'notes', 'inventory_status', 'location', 'shelf', 'condition', 'internal_barcode', 'source_db'];
-    const fieldLabels = {
-      bib: 'رقم المكتبة (bib)',
-      doctype: 'رقم التصنيف (doctype)',
-      title: 'العنوان *',
-      subtitle: 'العنوان الفرعي',
-      author: 'المؤلف',
-      language: 'اللغة',
-      publisher: 'الناشر',
-      pubdate: 'تاريخ النشر',
-      pubplace: 'مكان النشر',
-      publication_year: 'السنة',
-      isbn: 'ISBN',
-      diwi: 'رقم ديوي',
-      full_call_number: 'رقم التصنيف الكامل',
-      subjects: 'المواضيع',
-      edition: 'الطبعة',
-      descriptions: 'الوصف المادي',
-      notes: 'ملاحظات',
-      inventory_status: 'حالة الجرد',
-      location: 'الموقع',
-      shelf: 'الرف',
-      condition: 'الحالة',
-      internal_barcode: 'الباركود',
-      source_db: 'قاعدة المصدر'
+      var p = origFetch(input, init);
+      if (!isRest) return p;
+
+      return p.then(function (res) {
+        try {
+          if (res && !res.ok) {
+            recordFailure();
+            if (window.__patchErrors.length < 5) {
+              res.clone().text().then(function (txt) {
+                try {
+                  window.__patchErrors.push({
+                    url: res.url || url,
+                    status: res.status,
+                    body: (txt || '').slice(0, 500)
+                  });
+                } catch (e) {}
+              }).catch(function () {});
+            }
+          } else if (res && res.ok && isBooks && isWrite) {
+            // V3: successful local write → refresh own UI soon
+            scheduleUIRefresh('local-write');
+          }
+        } catch (e) {}
+        return res;
+      }).catch(function (err) {
+        try { recordFailure(); } catch (e) {}
+        throw err;
+      });
     };
+    LOG('fetch wrapper installed');
+  }
 
-    let html = `<div class="import-hint">📊 تم العثور على <b>${totalRows}</b> صف و <b>${headers.length}</b> عمود</div>`;
-    html += `<div style="margin: 12px 0; padding: 12px; background: var(--warning-light); border: 1px solid var(--warning); border-radius: 8px;">`;
-    html += `<label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;">`;
-    html += `<input type="checkbox" id="deleteOldBooks" style="width: 18px; height: 18px;"> 🗑️ حذف الكتب القديمة قبل الاستيراد</label>`;
-    html += `<div style="font-size: 12px; color: #92400e; margin-top: 4px;">سيتم حذف جميع الكتب الحالية من قاعدة البيانات المحلية قبل استيراد الجديدة</div></div>`;
-    html += `<h4 style="margin: 12px 0 8px; font-weight: 700; color: var(--text);">🔗 ربط الأعمدة</h4>`;
-    html += `<table class="import-table"><thead><tr><th>الحقل</th><th>العمود</th></tr></thead><tbody>`;
-
-    for (const fld of fields) {
-      html += `<tr><td>${fieldLabels[fld]}</td><td><select id="map_${fld}"><option value="">— تجاهل —</option>`;
-      for (const h of headers) {
-        const sel = autoMap[fld] === h ? 'selected' : '';
-        html += `<option value="${escapeHtml(h)}" ${sel}>${escapeHtml(h)}</option>`;
-      }
-      html += `</select></td></tr>`;
+  /* -----------------------------------------------------------
+     V3 NEW: direct Supabase bulk POST helper (bypasses dbAdd)
+     ----------------------------------------------------------- */
+  // Read config from the app (it loads lib_config into window.CONFIG
+  // during boot). We fall back to reading localStorage.lib_config
+  // ourselves so we can push even if window.CONFIG hasn't settled.
+  function getCfg() {
+    var c = window.CONFIG || {};
+    var url = c.supabaseUrl, key = c.supabaseKey, table = c.tableName || 'books';
+    if (!url || !key) {
+      try {
+        var raw = localStorage.getItem('lib_config');
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          url  = url  || parsed.supabaseUrl;
+          key  = key  || parsed.supabaseKey;
+          table = table || parsed.tableName || 'books';
+        }
+      } catch (e) {}
     }
+    return { url: url, key: key, table: table };
+  }
 
-    html += `</tbody></table>`;
-    html += `<div style="margin: 12px 0 8px; font-weight: 700; color: var(--text);">📋 عينة من البيانات:</div>`;
-    html += `<div class="sample-data"><table><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>`;
-
-    for (const row of sample) {
-      html += `<tr>${headers.map(h => `<td>${escapeHtml(String(row[h] || ''))}</td>`).join('')}</tr>`;
+  function directBulkInsert(rows) {
+    var cfg = getCfg();
+    if (!cfg.url || !cfg.key) {
+      WARN('directBulkInsert: no supabase config');
+      return Promise.reject(new Error('no-config'));
     }
-
-    html += `</tbody></table></div>`;
-    html += `<button class="btn btn-success" onclick="execImport()">📥 استيراد ${totalRows} كتاب</button>`;
-
-    box.innerHTML = html;
-  } catch (err) {
-    box.innerHTML = `<div class="import-hint" style="background: var(--error-light); border-color: var(--error); color: #991b1b;">❌ ${escapeHtml(err.message)}</div>`;
-    addLog('Error', `Import analysis failed: ${err.message}`);
-  }
-}
-
-async function execImport() {
-  if (!importFileRef) return;
-
-  const fields = ['bib', 'doctype', 'title', 'subtitle', 'author', 'language', 'publisher', 'pubdate', 'pubplace', 'publication_year', 'isbn', 'diwi', 'full_call_number', 'subjects', 'edition', 'descriptions', 'notes', 'inventory_status', 'location', 'shelf', 'condition', 'internal_barcode', 'source_db'];
-  const map = {};
-
-  for (const f of fields) {
-    const sel = $('map_' + f);
-    if (sel && sel.value) map[f] = sel.value;
-    else map[f] = '__NONE__';
-  }
-
-  const deleteOld = document.getElementById('deleteOldBooks') && document.getElementById('deleteOldBooks').checked;
-
-  const box = $('impBox');
-  box.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">جاري الاستيراد...</div></div>';
-
-  try {
-    if (deleteOld) {
-      const oldCount = await dbCount();
-      await dbClear();
-      addLog('Import', `Deleted ${oldCount} old books before import`);
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return Promise.resolve({ inserted: 0, failed: 0, data: [] });
     }
-    const { count } = await importFile(importFileRef, map);
-    box.innerHTML = `<div class="import-hint" style="background: var(--success-light); border-color: var(--success); color: #15803d;">✅ تم استيراد <b>${count}</b> كتاب بنجاح!${deleteOld ? ' (تم حذف القديمة أولاً)' : ''}</div>`;
-    showToast(`✅ ${count} كتاب`);
-    importFileRef = null;
-    addLog('Import', `Successfully imported ${count} books`);
-  } catch (err) {
-    box.innerHTML = `<div class="import-hint" style="background: var(--error-light); border-color: var(--error); color: #991b1b;">❌ ${escapeHtml(err.message)}</div>`;
-    addLog('Error', `Import execution failed: ${err.message}`);
-  }
-}
-
-async function exportBooks() {
-  try {
-    const books = await dbAll();
-    const ws = XLSX.utils.json_to_sheet(books);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Books');
-    XLSX.writeFile(wb, 'library-export.xlsx');
-    showToast('✅ تم التصدير');
-    addLog('Export', `Exported ${books.length} books`);
-  } catch (err) {
-    showToast(`❌ ${err.message}`);
-    addLog('Error', `Export failed: ${err.message}`);
-  }
-}
-
-// ============ REPORTS PAGE (v3 20260410e) ============
-async function loadReports() {
-  try {
-    const books = await dbAll();
-    const total = books.length;
-    const found = books.filter(b => b.inventory_status === 'Found').length;
-    const notChecked = books.filter(b => b.inventory_status === 'Not Checked' || !b.inventory_status).length;
-    const lost = books.filter(b => b.inventory_status === 'Not Found' || b.inventory_status === 'lost').length;
-
-    $('rptTotal').textContent = total;
-    $('rptFound').textContent = found;
-    $('rptNotChecked').textContent = notChecked;
-    $('rptLost').textContent = lost;
-
-    // By material type
-    const byType = {};
-    books.forEach(b => {
-      const t = b.material_type || 'غير محدد';
-      byType[t] = (byType[t] || 0) + 1;
-    });
-    const typeEntries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
-    $('rptByType').innerHTML = typeEntries.length
-      ? typeEntries.map(([k, v]) => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;"><span>${escapeHtml(k)}</span><b>${v}</b></div>`).join('')
-      : '<div style="color:var(--text-secondary);">لا توجد بيانات</div>';
-
-    // By location
-    const byLoc = {};
-    books.forEach(b => {
-      const l = b.location || 'غير محدد';
-      byLoc[l] = (byLoc[l] || 0) + 1;
-    });
-    const locEntries = Object.entries(byLoc).sort((a, b) => b[1] - a[1]).slice(0, 15);
-    $('rptByLocation').innerHTML = locEntries.length
-      ? locEntries.map(([k, v]) => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;"><span>${escapeHtml(k)}</span><b>${v}</b></div>`).join('')
-      : '<div style="color:var(--text-secondary);">لا توجد بيانات</div>';
-
-    // By user (inventoried_by)
-    const byUser = {};
-    books.forEach(b => {
-      if (b.inventoried_by && b.inventory_status === 'Found') {
-        byUser[b.inventoried_by] = (byUser[b.inventoried_by] || 0) + 1;
-      }
-    });
-    const userEntries = Object.entries(byUser).sort((a, b) => b[1] - a[1]);
-    $('rptByUser').innerHTML = userEntries.length
-      ? userEntries.map(([k, v]) => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;"><span>${escapeHtml(k)}</span><b>${v} كتاب</b></div>`).join('')
-      : '<div style="color:var(--text-secondary);">لم يجرد أحد شيئاً بعد</div>';
-
-    addLog('Reports', `Loaded stats: total=${total}, found=${found}, lost=${lost}`);
-  } catch (err) {
-    addLog('Error', `loadReports failed: ${err.message}`);
-  }
-}
-
-async function clearAll() {
-  const c = await dbCount();
-  if (!confirm(`حذف ${c} كتاب؟`)) return;
-  await dbClear();
-  showToast('✅ تم الحذف');
-  loadHome();
-  addLog('Clear', `Deleted all ${c} books`);
-}
-
-// ============ SETTINGS ============
-function loadCfg() {
-  // Show user info
-  if (currentUser) {
-    $('settingsUserName').textContent = currentUser.name;
-    $('settingsUserRole').textContent = currentUser.isAdmin ? 'مسؤول النظام' : 'مستخدم';
-  }
-
-  if (isAdmin()) {
-    $('adminSettings').style.display = 'block';
-    $('userSettings').style.display = 'none';
-    $('cfUrl').value = CONFIG.supabaseUrl || '';
-    $('cfKey').value = CONFIG.supabaseKey || '';
-    $('cfAI').value = CONFIG.openaiKey || '';
-    $('cfTable').value = CONFIG.tableName || 'books';
-    // Auto-generate team code if config exists
-    var tc = generateTeamCode();
-    if (tc) $('teamCodeDisplay').textContent = tc;
-    loadDebugLog();
-  } else {
-    $('adminSettings').style.display = 'none';
-    $('userSettings').style.display = 'block';
-    // Show connection status for regular users
-    var statusHtml = '';
-    statusHtml += CONFIG.supabaseUrl ? '✅ قاعدة البيانات: متصل<br>' : '❌ قاعدة البيانات: غير متصل<br>';
-    statusHtml += CONFIG.openaiKey ? '✅ الذكاء الاصطناعي: متاح<br>' : '❌ الذكاء الاصطناعي: غير متاح<br>';
-    statusHtml += navigator.onLine ? '✅ الإنترنت: متصل' : '❌ الإنترنت: غير متصل';
-    $('userConnStatus').innerHTML = statusHtml;
-  }
-}
-
-function saveCfg() {
-  if (!isAdmin()) { showToast('⚠️ فقط المسؤول يمكنه تعديل الإعدادات'); return; }
-  CONFIG.supabaseUrl = $('cfUrl').value.trim().replace(/\/$/, '');
-  CONFIG.supabaseKey = $('cfKey').value.trim();
-  CONFIG.openaiKey = $('cfAI').value.trim();
-  CONFIG.tableName = $('cfTable').value.trim() || 'books';
-  saveConfig();
-  // Also save OpenAI key to Supabase for team sharing
-  saveConfigToSupabase();
-  showToast('💾 تم الحفظ');
-  startAutoSync();
-  addLog('Settings', 'Configuration saved by admin');
-  // Update team code display
-  var tc = generateTeamCode();
-  if (tc) $('teamCodeDisplay').textContent = tc;
-}
-
-async function testConn() {
-  const st = $('cfStatus');
-  st.innerHTML = '<div style="text-align: center; padding: 20px;"><div class="spinner" style="margin: 0 auto; margin-bottom: 10px;"></div><div class="loading-text">جاري الاختبار...</div></div>';
-
-  let msg = '';
-
-  if (CONFIG.supabaseUrl) {
-    try {
-      await supaFetch(`${CONFIG.tableName}?select=count`, { headers: { 'Prefer': 'count=exact' } });
-      msg += '✅ Supabase متصل<br>';
-      addLog('Connection', 'Supabase connected');
-    } catch (e) {
-      msg += `❌ Supabase: ${e.message}<br>`;
-      addLog('Connection', `Supabase failed: ${e.message}`);
+    // Strip local-only fields and clean empties
+    var clean = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = Object.assign({}, rows[i]);
+      delete r.record_id; // let Supabase auto-assign
+      delete r.cloud_id;
+      delete r.id;
+      cleanRow(r);
+      clean.push(r);
     }
-  } else {
-    msg += '⚪ Supabase غير مُعد<br>';
-  }
-
-  if (CONFIG.openaiKey) {
-    try {
-      const r = await fetch('https://api.openai.com/v1/models', {
-        headers: { 'Authorization': `Bearer ${CONFIG.openaiKey}` }
+    var endpoint = cfg.url + '/rest/v1/' + cfg.table;
+    // Use origFetch so we don't re-clean (already cleaned) and
+    // don't add an extra layer of wrapping overhead.
+    return origFetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': cfg.key,
+        'Authorization': 'Bearer ' + cfg.key,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(clean)
+    }).then(function (res) {
+      return res.text().then(function (txt) {
+        var parsed = null;
+        try { parsed = txt ? JSON.parse(txt) : null; } catch (e) {}
+        if (!res.ok) {
+          WARN('directBulkInsert failed:', res.status, (txt || '').slice(0, 300));
+          var err = new Error('bulk insert ' + res.status);
+          err.status = res.status;
+          err.body = txt;
+          throw err;
+        }
+        return { inserted: Array.isArray(parsed) ? parsed.length : 0, data: parsed };
       });
-      msg += r.ok ? '✅ OpenAI متصل<br>' : `❌ OpenAI: ${r.status}<br>`;
-      if (r.ok) {
-        addLog('Connection', 'OpenAI connected');
-      } else {
-        addLog('Connection', `OpenAI failed: ${r.status}`);
-      }
-    } catch (e) {
-      msg += `❌ OpenAI: ${e.message}<br>`;
-      addLog('Connection', `OpenAI failed: ${e.message}`);
+    });
+  }
+  window.__patchBulkInsert = directBulkInsert; // public for diagnostics
+
+  /* -----------------------------------------------------------
+     V3 NEW: wrap importFile() so Excel imports POST directly
+             to Supabase, bypassing the deadlocked dbAdd path.
+     ----------------------------------------------------------- */
+  var importFileHookInstalled = false;
+  function installImportFileHook() {
+    if (importFileHookInstalled) return;
+    if (typeof window.importFile !== 'function') return;
+    if (typeof window.autoDetectColumns !== 'function') return;
+    if (typeof window.XLSX === 'undefined') return; // need SheetJS loaded
+
+    var origImport = window.importFile;
+    window.importFile = function patchedImportFile(file, columnMap) {
+      LOG('importFile intercepted — using direct Supabase bulk POST');
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          (async function () {
+            try {
+              var data = new Uint8Array(ev.target.result);
+              var wb = XLSX.read(data, { type: 'array' });
+              var sheet = wb.Sheets[wb.SheetNames[0]];
+              var rows = XLSX.utils.sheet_to_json(sheet);
+              if (!rows.length) return reject(new Error('الملف فارغ'));
+
+              var map = columnMap || window.autoDetectColumns(Object.keys(rows[0]));
+              LOG('importFile: ' + rows.length + ' rows, mapping=', map);
+
+              // Build Supabase-ready rows (matches app's importFile shape)
+              var now = new Date().toISOString();
+              var books = [];
+              for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                var book = {
+                  bib: r[map.bib] || '',
+                  doctype: r[map.doctype] || '',
+                  title: r[map.title] || '',
+                  subtitle: r[map.subtitle] || '',
+                  author: r[map.author] || '',
+                  additional_author: r[map.additional_author] || '',
+                  language: r[map.language] || '',
+                  publisher: r[map.publisher] || '',
+                  publication_year: r[map.publication_year] || '',
+                  pubdate: r[map.pubdate] || '',
+                  pubplace: r[map.pubplace] || '',
+                  isbn: r[map.isbn] || '',
+                  dewey_number: r[map.dewey_number] || '',
+                  diwi: r[map.diwi] || '',
+                  cutter_number: r[map.cutter_number] || '',
+                  full_call_number: r[map.full_call_number] || '',
+                  subjects: r[map.subjects] || '',
+                  edition: r[map.edition] || '',
+                  descriptions: r[map.descriptions] || '',
+                  material_type: r[map.material_type] || 'Book',
+                  inventory_status: r[map.inventory_status] || 'Not Checked',
+                  condition: r[map.condition] || 'Good',
+                  location: r[map.location] || '',
+                  shelf: r[map.shelf] || '',
+                  notes: r[map.notes] || '',
+                  internal_barcode: r[map.internal_barcode] || '',
+                  last_inventory_date: r[map.last_inventory_date] || '',
+                  match_confidence: '',
+                  match_method: '',
+                  review_status: r[map.review_status] || 'Pending',
+                  source_db: r[map.source_db] || '',
+                  cover_image_name: '',
+                  created_at: now,
+                  updated_at: now
+                };
+                if (book.title) books.push(book);
+              }
+
+              if (books.length === 0) return reject(new Error('لا توجد صفوف صالحة'));
+
+              // Chunk into batches of 100 so very large imports still work
+              var CHUNK = 100;
+              var totalInserted = 0;
+              for (var c = 0; c < books.length; c += CHUNK) {
+                var batch = books.slice(c, c + CHUNK);
+                var result = await directBulkInsert(batch);
+                totalInserted += result.inserted || 0;
+                LOG('importFile: batch ' + (c / CHUNK + 1) +
+                    ' → +' + (result.inserted || 0) + ' rows');
+              }
+
+              LOG('importFile: direct bulk insert complete → ' + totalInserted + ' rows');
+
+              // Also refresh the local UI so the admin sees their
+              // own upload reflected without waiting for pullFromCloud.
+              scheduleUIRefresh('import-complete');
+
+              // Kick a pullFromCloud so the local IndexedDB eventually
+              // catches up in the background (best-effort; if deadlocked
+              // the user can still see the data via the app's fresh
+              // reads / via other devices).
+              try {
+                if (typeof window.pullFromCloud === 'function') {
+                  setTimeout(function () {
+                    try { window.pullFromCloud(); } catch (e) {}
+                  }, 500);
+                }
+              } catch (e) {}
+
+              resolve({
+                count: totalInserted,
+                columns: Object.keys(rows[0]),
+                mapping: map
+              });
+            } catch (err) {
+              WARN('importFile direct path failed:', err && err.message);
+              // Fall back to original implementation as last resort
+              try {
+                var fallback = await origImport.call(window, file, columnMap);
+                resolve(fallback);
+              } catch (e2) {
+                reject(err);
+              }
+            }
+          })();
+        };
+        reader.onerror = function () { reject(reader.error); };
+        reader.readAsArrayBuffer(file);
+      });
+    };
+    importFileHookInstalled = true;
+    LOG('importFile hook installed (direct Supabase bulk POST)');
+  }
+
+  /* -----------------------------------------------------------
+     V3 NEW: wrap queueSync to trigger debounced push
+     ----------------------------------------------------------- */
+  var queueSyncHookInstalled = false;
+  function installQueueSyncHook() {
+    if (queueSyncHookInstalled) return;
+    if (typeof window.queueSync !== 'function') return;
+    var orig = window.queueSync;
+    window.queueSync = function (action, book) {
+      var r;
+      try { r = orig.apply(this, arguments); }
+      catch (e) { WARN('orig queueSync threw:', e && e.message); }
+      schedulePush();
+      return r;
+    };
+    queueSyncHookInstalled = true;
+    LOG('queueSync hook installed (debounced push on every queue)');
+  }
+
+  /* -----------------------------------------------------------
+     V3 NEW: wrap realtimeWs.onmessage to force UI refresh
+     ----------------------------------------------------------- */
+  var realtimeHookedWs = null;
+  function installRealtimeHook() {
+    var ws = window.realtimeWs;
+    if (!ws) return;
+    if (realtimeHookedWs === ws) return; // already hooked this WS
+    if (ws.readyState > 1) return;
+    try {
+      var origOnMessage = ws.onmessage;
+      ws.onmessage = function (evt) {
+        // Call original first (lets app do its pullFromCloud)
+        try { if (origOnMessage) origOnMessage.call(this, evt); }
+        catch (e) { WARN('orig onmessage threw:', e && e.message); }
+        // Then force our own refresh pass
+        try {
+          var msg;
+          try { msg = JSON.parse(evt.data); } catch (e) { return; }
+          if (!msg) return;
+          var isChange =
+            msg.event === 'postgres_changes' ||
+            msg.event === 'INSERT' || msg.event === 'UPDATE' || msg.event === 'DELETE' ||
+            (msg.payload && msg.payload.data &&
+             (msg.payload.data.type === 'INSERT' ||
+              msg.payload.data.type === 'UPDATE' ||
+              msg.payload.data.type === 'DELETE'));
+          if (!isChange) return;
+          LOG('realtime change received → forced UI refresh');
+          // Pull fresh data then refresh render
+          if (typeof window.pullFromCloud === 'function') {
+            Promise.resolve(window.pullFromCloud())
+              .then(function () { scheduleUIRefresh('realtime'); })
+              .catch(function () { scheduleUIRefresh('realtime'); });
+          } else {
+            scheduleUIRefresh('realtime');
+          }
+        } catch (e) { WARN('realtime hook error:', e && e.message); }
+      };
+      realtimeHookedWs = ws;
+      LOG('realtime onmessage hook installed');
+    } catch (e) { WARN('installRealtimeHook error:', e && e.message); }
+  }
+
+  /* -----------------------------------------------------------
+     BUG 1: ensure startAutoSync/startRealtimeSync are invoked
+     ----------------------------------------------------------- */
+  var autoSyncStartedFor = null;
+
+  function currentUserHint() {
+    try {
+      return (
+        window.CURRENT_USER ||
+        window.currentUser ||
+        window.APP_USER ||
+        localStorage.getItem('lib_current_user') ||
+        localStorage.getItem('lib_user') ||
+        sessionStorage.getItem('lib_current_user') ||
+        null
+      );
+    } catch (e) { return null; }
+  }
+
+  function loginScreenVisible() {
+    try {
+      var el = document.getElementById('loginScreen') ||
+               document.getElementById('login') ||
+               document.querySelector('[data-screen="login"]');
+      if (!el) return false;
+      var s = getComputedStyle(el);
+      return s.display !== 'none' && s.visibility !== 'hidden' &&
+             !el.classList.contains('hidden');
+    } catch (e) { return false; }
+  }
+
+  function appLooksReady() {
+    var hints = document.querySelectorAll(
+      'input[placeholder*="ابحث"], .book-card, .kpi, #booksGrid, #bookList, [data-screen="home"]'
+    );
+    if (hints.length > 0 && !loginScreenVisible()) return true;
+    return false;
+  }
+
+  function tryStartAutoSync() {
+    installQueueSyncHook();    // V3: try to install queueSync hook every poll
+    installRealtimeHook();     // V3: try to install realtime hook every poll
+    installImportFileHook();   // V3: hook Excel importFile direct to Supabase
+
+    if (!appLooksReady()) return;
+    var hasAuto = typeof window.startAutoSync === 'function';
+    var hasRt   = typeof window.startRealtimeSync === 'function';
+    if (!hasAuto && !hasRt) return;
+
+    var who = currentUserHint() || 'anon';
+    if (autoSyncStartedFor === who) return;
+
+    if (hasAuto) {
+      try { LOG('calling startAutoSync() for user=' + who); window.startAutoSync(); }
+      catch (e) { WARN('startAutoSync() threw:', e && e.message); }
     }
-  } else {
-    msg += '⚪ OpenAI غير مُعد<br>';
-  }
-
-  st.innerHTML = `<div class="import-hint">${msg}</div>`;
-}
-
-// ============ CONFIG DIAGNOSTIC ============
-function toggleDiag() {
-  const content = $('diagContent');
-  const icon = $('diagIcon');
-  content.classList.toggle('open');
-  icon.classList.toggle('open');
-  if (content.classList.contains('open')) loadDiagnostic();
-}
-
-function loadDiagnostic() {
-  const panel = $('diagPanel');
-  const diag = typeof getConfigDiagnostic === 'function' ? getConfigDiagnostic() : null;
-  if (!diag) {
-    panel.innerHTML = '<div style="color: var(--error);">getConfigDiagnostic() not available</div>';
-    return;
-  }
-
-  let html = '<div style="font-family: monospace; font-size: 12px;">';
-  html += '<div style="margin-bottom: 8px; font-weight: 700; color: var(--primary);">Config Status:</div>';
-  html += `<div>${diag.current.supabaseUrl}</div>`;
-  html += `<div>${diag.current.supabaseKey}</div>`;
-  html += `<div>${diag.current.openaiKey}</div>`;
-  html += `<div>Table: ${diag.current.tableName}</div>`;
-  html += '<hr style="margin: 8px 0; border-color: var(--border);">';
-  html += `<div>Source: <b>${diag.source}</b> ${diag.restored ? '(restored from backup)' : ''}</div>`;
-  html += `<div>localStorage[lib_config]: ${diag.localStorage.lib_config ? '✅' : '❌'}</div>`;
-  html += `<div>localStorage[lib_config_backup]: ${diag.localStorage.lib_config_backup ? '✅' : '❌'}</div>`;
-  html += '<hr style="margin: 8px 0; border-color: var(--border);">';
-  html += '<div style="font-weight: 700;">Load Attempts:</div>';
-  for (const a of diag.attempts) {
-    html += `<div style="padding: 2px 0;">${a}</div>`;
-  }
-  html += '</div>';
-  panel.innerHTML = html;
-}
-
-function copyDiag() {
-  const diag = typeof getConfigDiagnostic === 'function' ? getConfigDiagnostic() : {};
-  const text = JSON.stringify(diag, null, 2);
-  navigator.clipboard.writeText(text).then(() => showToast('📋 تم نسخ التشخيص'));
-}
-
-// ============ DEBUG LOG ============
-function toggleDebug() {
-  const content = $('debugContent');
-  const icon = content.previousElementSibling.querySelector('.debug-icon');
-  content.classList.toggle('open');
-  icon.classList.toggle('open');
-}
-
-function loadDebugLog() {
-  const log = $('debugLog');
-  // Merge local debugEntries + app.js DEBUG_LOG
-  const allEntries = [...debugEntries];
-  if (typeof DEBUG_LOG !== 'undefined') {
-    for (const e of DEBUG_LOG) {
-      allEntries.push({ time: e.time.split('T')[1].split('.')[0], category: e.cat, message: e.msg });
+    if (hasRt) {
+      try { LOG('calling startRealtimeSync() for user=' + who); window.startRealtimeSync(); }
+      catch (e) { WARN('startRealtimeSync() threw:', e && e.message); }
     }
+    autoSyncStartedFor = who;
   }
-  // Sort by time descending
-  allEntries.sort((a, b) => b.time > a.time ? 1 : -1);
 
-  log.innerHTML = allEntries.map(entry => `
-    <div class="debug-entry ${entry.category === 'Error' || entry.category === 'ERROR' ? 'error' : entry.category === 'Warning' ? 'warning' : ''}">
-      <span class="debug-time">${entry.time}</span>
-      <span class="debug-category">${entry.category}</span>
-      <div class="debug-message">${escapeHtml(entry.message)}</div>
-    </div>
-  `).join('');
-
-  if (!allEntries.length) {
-    log.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">لا توجد سجلات</div>';
-  }
-}
-
-function copyDebugLog() {
-  let text = debugEntries.map(e => `[${e.time}] [${e.category}] ${e.message}`).join('\n');
-  if (typeof getDebugLog === 'function') {
-    text += '\n--- app.js log ---\n' + getDebugLog();
-  }
-  navigator.clipboard.writeText(text).then(() => {
-    showToast('📋 تم النسخ');
+  var poll = setInterval(tryStartAutoSync, 1500);
+  setTimeout(function () { clearInterval(poll); }, 10 * 60 * 1000);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) tryStartAutoSync();
   });
-}
+  window.addEventListener('focus', tryStartAutoSync);
 
-// ============ UTILITIES ============
-function escapeHtml(text) {
-  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-  return String(text).replace(/[&<>"']/g, m => map[m]);
-}
-
-// showToast and statusAr are defined in app.js — do NOT redeclare here
-
-function statusBadgeClass(status) {
-  const map = {
-    'Found': 'badge-online',
-    'Not Found': 'badge-sync-error',
-    'Not Checked': 'badge-syncing',
-    'Confirmed': 'badge-synced',
-    'Pending': 'badge-offline'
-  };
-  return map[status] || 'badge-offline';
-}
-
-// ============ CONNECTIVITY ============
-// setSyncStatus is defined in app.js — do NOT redeclare here
-
-function updConn() {
-  if (!CONFIG.supabaseUrl) {
-    setSyncStatus('offline');
-    $('connBadge').textContent = '⚪ غير مُعد';
-    return;
-  }
-
-  if (navigator.onLine) {
-    $('connBadge').textContent = '🟢 متصل';
-    $('connBadge').className = 'badge badge-online';
-    fullSync();
-  } else {
-    $('connBadge').textContent = '🔴 منقطع';
-    $('connBadge').className = 'badge badge-offline';
-    setSyncStatus('offline');
-  }
-}
-
-window.addEventListener('online', () => {
-  showToast('🟢 متصل — جاري التزامن...');
-  updConn();
-});
-
-window.addEventListener('offline', () => {
-  showToast('📴 بدون إنترنت — الوضع المحلي');
-  setSyncStatus('offline');
-});
-
-// ============ PULL TO REFRESH ============
-let touchStart = 0;
-let pulling = false;
-
-document.addEventListener('touchstart', e => {
-  if (window.scrollY === 0 && curPage === 'home') {
-    touchStart = e.touches[0].clientY;
-    pulling = true;
-  }
-}, { passive: true });
-
-document.addEventListener('touchmove', e => {
-  if (pulling) {
-    const d = e.touches[0].clientY - touchStart;
-    const ptr = $('ptrInd');
-    if (d > 60) {
-      ptr.classList.add('show');
-      ptr.textContent = '↓ أفلت للتحديث';
-    } else if (d > 0) {
-      ptr.classList.add('show');
-      ptr.textContent = '↓ اسحب للتحديث';
-    }
-  }
-}, { passive: true });
-
-document.addEventListener('touchend', e => {
-  if (pulling && $('ptrInd').classList.contains('show')) {
-    const d = (e.changedTouches[0]?.clientY || 0) - touchStart;
-    if (d > 60) {
-      $('ptrInd').textContent = '🔄 جاري التحديث...';
-      fullSync().finally(() => {
-        loadHome();
-        $('ptrInd').classList.remove('show');
-      });
-    } else {
-      $('ptrInd').classList.remove('show');
-    }
-  }
-  pulling = false;
-});
-
-// ============ LOGIN HANDLERS ============
-async function handleLogin() {
-  var username = $('loginUser').value;
-  var password = $('loginPass').value;
-  var errEl = $('loginError');
-
-  if (!username) { errEl.textContent = 'اختر حسابك'; errEl.style.display = 'block'; return; }
-  if (!password) { errEl.textContent = 'أدخل كلمة المرور'; errEl.style.display = 'block'; return; }
-
-  $('loginBtn').textContent = 'جاري الدخول...';
-  $('loginBtn').disabled = true;
-
-  try {
-    var result = await doLogin(username, password);
-
-    if (result.success) {
-      errEl.style.display = 'none';
-      $('loginPass').value = '';
-      showMainApp();
-      addLog('Auth', 'Login: ' + username);
-    } else {
-      errEl.textContent = result.error;
-      errEl.style.display = 'block';
-      $('loginBtn').textContent = 'تسجيل الدخول';
-      $('loginBtn').disabled = false;
-    }
-  } catch (e) {
-    console.error('Login error:', e);
-    errEl.textContent = 'خطأ في تسجيل الدخول، حاول مرة أخرى';
-    errEl.style.display = 'block';
-    $('loginBtn').textContent = 'تسجيل الدخول';
-    $('loginBtn').disabled = false;
-  }
-}
-
-function handleLogout() {
-  doLogout();
-  hideMainApp();
-  showToast('تم تسجيل الخروج');
-}
-
-function showMainApp() {
-  $('pgLogin').classList.remove('active');
-  $('loginBtn').textContent = 'تسجيل الدخول';
-  $('loginBtn').disabled = false;
-  document.querySelector('.bnav').style.display = 'flex';
-  document.querySelector('.hdr').style.display = '';
-  nav('home');
-
-  // Always try to load OpenAI key from Supabase (for all users, not just non-admin)
-  if (CONFIG.supabaseUrl && !CONFIG.openaiKey) {
-    loadConfigFromSupabase().then(function(loaded) {
-      if (loaded) {
-        addLog('Config', 'OpenAI key loaded from cloud');
-        _saveConfigToAllStores();
-      }
-      updConn();
-      // Start auto-sync + realtime after config is ready
-      startAutoSync();
-    });
-  } else {
-    updConn();
-    // Start auto-sync + realtime immediately
-    startAutoSync();
-  }
-}
-
-function hideMainApp() {
-  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
-  $('pgLogin').classList.add('active');
-  document.querySelector('.bnav').style.display = 'none';
-  document.querySelector('.hdr').style.display = 'none';
-  $('loginBtn').textContent = 'تسجيل الدخول';
-  $('loginBtn').disabled = false;
-}
-
-function toggleTeamSetup() {
-  var box = $('teamSetupBox');
-  if (box.style.display === 'none') {
-    box.style.display = 'block';
-    $('teamSetupToggle').textContent = '✕ إغلاق';
-  } else {
-    box.style.display = 'none';
-    $('teamSetupToggle').textContent = '🔗 لدي رمز فريق';
-  }
-}
-
-function handleTeamCode() {
-  var code = $('teamCodeInput').value;
-  if (!code.trim()) { showToast('الصق الرمز أولاً'); return; }
-  var result = applyTeamCode(code);
-  if (result.success) {
-    showToast('✅ تم تفعيل الاتصال');
-    $('teamSetupBox').style.display = 'none';
-    $('teamSetupToggle').textContent = '✅ متصل';
-    $('teamSetupToggle').disabled = true;
-    // Load OpenAI key from Supabase and start sync after team code is applied
-    loadConfigFromSupabase().then(function(loaded) {
-      if (loaded) {
-        addLog('Config', 'OpenAI key loaded from cloud after team code');
-        _saveConfigToAllStores();
-      }
-      startAutoSync();
-    });
-  } else {
-    showToast('❌ ' + result.error);
-  }
-}
-
-function genTeamCode() {
-  var tc = generateTeamCode();
-  if (tc) {
-    $('teamCodeDisplay').textContent = tc;
-    showToast('✅ تم إنشاء الرمز');
-  } else {
-    showToast('⚠️ أعد Supabase أولاً ثم احفظ');
-  }
-}
-
-function copyTeamCode() {
-  var tc = $('teamCodeDisplay').textContent;
-  if (tc && tc !== '—') {
-    navigator.clipboard.writeText(tc).then(function() { showToast('📋 تم نسخ الرمز'); });
-  }
-}
-
-// ============ SERVICE WORKER ============
-// v3 20260410e: version check — if the stored app version doesn't match
-// the current deployed version we unregister the old SW + clear caches
-// and reload once. This forces phones to pick up new deploys immediately.
-(function checkAppVersionAndMaybeReset() {
-  try {
-    var CUR = '20260410e';
-    var stored = localStorage.getItem('lib_app_version');
-    if (stored !== CUR) {
-      localStorage.setItem('lib_app_version', CUR);
-      // First time we see this version — force fresh start.
-      if (stored && 'serviceWorker' in navigator) {
-        console.log('[APP VERSION] ' + stored + ' → ' + CUR + ' : forcing SW + cache refresh');
-        navigator.serviceWorker.getRegistrations().then(function(regs){
-          regs.forEach(function(r){ try { r.unregister(); } catch(e){} });
-          if (window.caches && caches.keys) {
-            return caches.keys().then(function(keys){
-              return Promise.all(keys.map(function(k){ return caches.delete(k); }));
-            });
-          }
-        }).then(function(){
-          // Reload once so the user ends up on the brand-new version.
-          if (!sessionStorage.getItem('lib_v_reloaded')) {
-            sessionStorage.setItem('lib_v_reloaded','1');
-            location.reload();
-          }
-        }).catch(function(){});
-      }
-    }
-  } catch(e){}
+  LOG('login watcher installed');
+  LOG('ready');
 })();
-
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=20260410e').then(function(reg){
-    // Poll for updates so phones pick up future deploys without manual refresh.
-    try { reg.update(); } catch(e){}
-    setInterval(function(){ try { reg.update(); } catch(e){} }, 60 * 1000);
-  }).catch(e => {
-    console.log('SW registration failed:', e);
-    addLog('ServiceWorker', `Registration failed: ${e.message}`);
-  });
-}
-
-// ============ INIT ============
-async function initApp() {
-  addLog('App', 'Initializing v5c with Auth...');
-
-  // Step 1: Load config from localStorage
-  loadConfig();
-
-  try {
-    // Step 2: Open IndexedDB
-    await openDB();
-
-    // Step 3: Try to restore config from IndexedDB
-    await loadConfigFromIDB();
-
-    // Step 4: Backup config
-    if (CONFIG.supabaseUrl || CONFIG.openaiKey) {
-      _saveConfigToAllStores();
-    }
-
-    // Step 5: Check for existing session
-    if (restoreSession()) {
-      showMainApp();
-    } else {
-      hideMainApp();
-      // Check if Supabase is configured — if not, show team code hint for non-first-time
-      if (!CONFIG.supabaseUrl) {
-        // No config at all — maybe show team code section
-      }
-    }
-
-    addLog('App', 'Library v5c Ready | Auth: ' + (currentUser ? currentUser.name : 'not logged in'));
-  } catch(err) {
-    addLog('Error', 'Failed to initialize: ' + err.message);
-    hideMainApp(); // Show login at least
-  }
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
-} else {
-  initApp();
-}
-</script>
-
-</body>
-</html>
