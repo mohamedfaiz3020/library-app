@@ -7,8 +7,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="جرد المكتبة">
 <meta name="theme-color" content="#0f172a">
+<!-- V3 20260410e: aggressive cache-busting so phones always pull the latest -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="app-version" content="20260410e">
 <title>جرد المكتبة v5</title>
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json?v=20260410e">
 <style>:root {
   --primary: #1e3a5f;
   --primary-dark: #0f2440;
@@ -1250,9 +1255,59 @@ select.form-input {
       <div class="action-title">استيراد/تصدير</div>
       <div class="action-subtitle">الملفات</div>
     </div>
+    <div class="action-card" onclick="nav('reports')">
+      <span class="action-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg></span>
+      <div class="action-title">التقارير والإحصائيات</div>
+      <div class="action-subtitle">ملخص شامل</div>
+    </div>
   </div>
 
   <button class="btn btn-ghost" onclick="nav('allbooks')">📚 جميع الكتب</button>
+</div>
+
+<!-- REPORTS / STATISTICS PAGE (v3 20260410e) -->
+<div class="page" id="pgReports">
+  <div class="card" style="margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <h3 style="margin:0;">📊 ملخص المكتبة</h3>
+      <button class="btn btn-ghost" onclick="loadReports()" style="padding:6px 12px;font-size:13px;">🔄 تحديث</button>
+    </div>
+    <div id="reportsKpis" class="kpi-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
+      <div class="kpi" style="background:var(--primary-light);padding:14px;border-radius:10px;">
+        <div style="font-size:12px;color:var(--text-secondary);">إجمالي الكتب</div>
+        <div id="rptTotal" style="font-size:24px;font-weight:700;color:var(--primary);">—</div>
+      </div>
+      <div class="kpi" style="background:var(--success-light);padding:14px;border-radius:10px;">
+        <div style="font-size:12px;color:var(--text-secondary);">تم جردها</div>
+        <div id="rptFound" style="font-size:24px;font-weight:700;color:var(--success);">—</div>
+      </div>
+      <div class="kpi" style="background:var(--warning-light);padding:14px;border-radius:10px;">
+        <div style="font-size:12px;color:var(--text-secondary);">لم تُجرد بعد</div>
+        <div id="rptNotChecked" style="font-size:24px;font-weight:700;color:var(--warning);">—</div>
+      </div>
+      <div class="kpi" style="background:var(--error-light);padding:14px;border-radius:10px;">
+        <div style="font-size:12px;color:var(--text-secondary);">مفقودة</div>
+        <div id="rptLost" style="font-size:24px;font-weight:700;color:var(--error);">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin:0 0 12px 0;">📂 حسب نوع المادة</h3>
+    <div id="rptByType" style="font-size:14px;line-height:1.8;color:var(--text);">—</div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin:0 0 12px 0;">📍 حسب الموقع</h3>
+    <div id="rptByLocation" style="font-size:14px;line-height:1.8;color:var(--text);">—</div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin:0 0 12px 0;">👥 نشاط المُجرِدين</h3>
+    <div id="rptByUser" style="font-size:14px;line-height:1.8;color:var(--text);">—</div>
+  </div>
+
+  <button class="btn btn-primary" onclick="exportBooks()" style="width:100%;margin-top:8px;">📥 تصدير كل البيانات (Excel)</button>
 </div>
 
 <!-- SEARCH PAGE -->
@@ -1567,7 +1622,7 @@ select.form-input {
 
 <script src="tesseract/tesseract.min.js"></script>
 <script src="lib/xlsx.full.min.js"></script>
-<script src="app.v5c.patch.js?v=20260410d"></script>
+<script src="app.v5c.patch.js?v=20260410e"></script>
 <script src="app.v5c.js?v=20260408b"></script>
 
 <script>
@@ -1610,6 +1665,7 @@ function nav(page) {
     review: 'pgReview',
     allbooks: 'pgAllBooks',
     import: 'pgImport',
+    reports: 'pgReports',
     settings: 'pgSettings'
   };
 
@@ -1636,13 +1692,14 @@ function nav(page) {
   }
   else if (page === 'review') loadReview();
   else if (page === 'allbooks') loadAllBooks();
+  else if (page === 'reports') loadReports();
   else if (page === 'settings') loadCfg();
 }
 
 function updateNav() {
   document.querySelectorAll('.bnav-item').forEach(item => item.classList.remove('active'));
   let navPage = curPage;
-  if (['detail', 'add', 'review', 'allbooks', 'import'].includes(curPage)) {
+  if (['detail', 'add', 'review', 'allbooks', 'import', 'reports'].includes(curPage)) {
     navPage = 'home';
   }
   const navMap = { home: 0, search: 1, scan: 2, settings: 3 };
@@ -1661,6 +1718,7 @@ function updateHeader() {
     review: 'قائمة المراجعة',
     allbooks: 'جميع الكتب',
     import: 'الاستيراد والتصدير',
+    reports: 'التقارير والإحصائيات',
     settings: 'الإعدادات'
   };
   $('hdrTitle').textContent = titles[curPage] || 'جرد المكتبة';
@@ -2375,6 +2433,60 @@ async function exportBooks() {
   }
 }
 
+// ============ REPORTS PAGE (v3 20260410e) ============
+async function loadReports() {
+  try {
+    const books = await dbAll();
+    const total = books.length;
+    const found = books.filter(b => b.inventory_status === 'Found').length;
+    const notChecked = books.filter(b => b.inventory_status === 'Not Checked' || !b.inventory_status).length;
+    const lost = books.filter(b => b.inventory_status === 'Not Found' || b.inventory_status === 'lost').length;
+
+    $('rptTotal').textContent = total;
+    $('rptFound').textContent = found;
+    $('rptNotChecked').textContent = notChecked;
+    $('rptLost').textContent = lost;
+
+    // By material type
+    const byType = {};
+    books.forEach(b => {
+      const t = b.material_type || 'غير محدد';
+      byType[t] = (byType[t] || 0) + 1;
+    });
+    const typeEntries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+    $('rptByType').innerHTML = typeEntries.length
+      ? typeEntries.map(([k, v]) => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;"><span>${escapeHtml(k)}</span><b>${v}</b></div>`).join('')
+      : '<div style="color:var(--text-secondary);">لا توجد بيانات</div>';
+
+    // By location
+    const byLoc = {};
+    books.forEach(b => {
+      const l = b.location || 'غير محدد';
+      byLoc[l] = (byLoc[l] || 0) + 1;
+    });
+    const locEntries = Object.entries(byLoc).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    $('rptByLocation').innerHTML = locEntries.length
+      ? locEntries.map(([k, v]) => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;"><span>${escapeHtml(k)}</span><b>${v}</b></div>`).join('')
+      : '<div style="color:var(--text-secondary);">لا توجد بيانات</div>';
+
+    // By user (inventoried_by)
+    const byUser = {};
+    books.forEach(b => {
+      if (b.inventoried_by && b.inventory_status === 'Found') {
+        byUser[b.inventoried_by] = (byUser[b.inventoried_by] || 0) + 1;
+      }
+    });
+    const userEntries = Object.entries(byUser).sort((a, b) => b[1] - a[1]);
+    $('rptByUser').innerHTML = userEntries.length
+      ? userEntries.map(([k, v]) => `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;"><span>${escapeHtml(k)}</span><b>${v} كتاب</b></div>`).join('')
+      : '<div style="color:var(--text-secondary);">لم يجرد أحد شيئاً بعد</div>';
+
+    addLog('Reports', `Loaded stats: total=${total}, found=${found}, lost=${lost}`);
+  } catch (err) {
+    addLog('Error', `loadReports failed: ${err.message}`);
+  }
+}
+
 async function clearAll() {
   const c = await dbCount();
   if (!confirm(`حذف ${c} كتاب؟`)) return;
@@ -2776,8 +2888,43 @@ function copyTeamCode() {
 }
 
 // ============ SERVICE WORKER ============
+// v3 20260410e: version check — if the stored app version doesn't match
+// the current deployed version we unregister the old SW + clear caches
+// and reload once. This forces phones to pick up new deploys immediately.
+(function checkAppVersionAndMaybeReset() {
+  try {
+    var CUR = '20260410e';
+    var stored = localStorage.getItem('lib_app_version');
+    if (stored !== CUR) {
+      localStorage.setItem('lib_app_version', CUR);
+      // First time we see this version — force fresh start.
+      if (stored && 'serviceWorker' in navigator) {
+        console.log('[APP VERSION] ' + stored + ' → ' + CUR + ' : forcing SW + cache refresh');
+        navigator.serviceWorker.getRegistrations().then(function(regs){
+          regs.forEach(function(r){ try { r.unregister(); } catch(e){} });
+          if (window.caches && caches.keys) {
+            return caches.keys().then(function(keys){
+              return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+            });
+          }
+        }).then(function(){
+          // Reload once so the user ends up on the brand-new version.
+          if (!sessionStorage.getItem('lib_v_reloaded')) {
+            sessionStorage.setItem('lib_v_reloaded','1');
+            location.reload();
+          }
+        }).catch(function(){});
+      }
+    }
+  } catch(e){}
+})();
+
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(e => {
+  navigator.serviceWorker.register('sw.js?v=20260410e').then(function(reg){
+    // Poll for updates so phones pick up future deploys without manual refresh.
+    try { reg.update(); } catch(e){}
+    setInterval(function(){ try { reg.update(); } catch(e){} }, 60 * 1000);
+  }).catch(e => {
     console.log('SW registration failed:', e);
     addLog('ServiceWorker', `Registration failed: ${e.message}`);
   });
