@@ -52,8 +52,8 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410g';
-  var RESET_MARKER  = '20260410g-reset-v1';
+  var PATCH_VERSION = '20260410h';
+  var RESET_MARKER  = '20260410h-reset-v1';
 
   function LOG() {
     try {
@@ -1104,7 +1104,29 @@
     if (hints.length > 0 && !loginScreenVisible()) return true;
     return false;
   }
+  // V4 FIX: re-assert our patched UI functions in case app.v5c.js's
+  // hoisted `function loadReports(){}` / `function showDet(){}` / `function renderList(){}`
+  // overwrote our earlier window assignments. Safe to call repeatedly.
+  function reassertV4Patches() {
+    try { if (window.loadReports !== patchedLoadReports) window.loadReports = patchedLoadReports; } catch (e) {}
+    try { if (window.showDet     !== patchedShowDet)     window.showDet     = patchedShowDet;     } catch (e) {}
+    try { if (window.renderList  !== patchedRenderList)  window.renderList  = patchedRenderList;  } catch (e) {}
+    try { if (window.pullFromCloud !== paginatedPullFromCloud) window.pullFromCloud = paginatedPullFromCloud; } catch (e) {}
+  }
+  // Expose for manual debugging / external re-arming
+  window.__v4ReassertPatches = reassertV4Patches;
+  // Run now, on DOMContentLoaded, and at small delays for belt-and-suspenders.
+  reassertV4Patches();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', reassertV4Patches);
+  }
+  setTimeout(reassertV4Patches, 50);
+  setTimeout(reassertV4Patches, 250);
+  setTimeout(reassertV4Patches, 1000);
+  setTimeout(reassertV4Patches, 3000);
+
   function tryStartAutoSync() {
+    reassertV4Patches();
     installQueueSyncHook();
     installRealtimeHook();
     installImportFileHook();
