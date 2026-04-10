@@ -1375,7 +1375,7 @@ function extractFields(rawText, mode) {
 function showToast(msg, duration) {
   // Dynamic toast element (v5 style - no static #toast needed)
   const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom,20px) + 12px);left:16px;right:16px;background:#0f172a;color:#fff;padding:12px 16px;border-radius:12px;font-size:14px;font-weight:600;z-index:1000;text-align:center;direction:rtl;max-width:calc(100% - 32px);animation:slideUp .3s ease;';
+  toast.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom,20px) + 12px);left:16px;right:16px;background:#162030;color:#f0f4f8;padding:12px 16px;border-radius:12px;font-size:14px;font-weight:600;z-index:1000;text-align:center;direction:rtl;max-width:calc(100%-32px);border:1px solid rgba(99,172,255,.12);font-family:Tajawal,sans-serif;';
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), duration || 3000);
