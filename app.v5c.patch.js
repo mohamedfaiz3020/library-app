@@ -40,11 +40,28 @@
         request through the patched fetch wrapper, bypassing the
         deadlocked dbAdd path. It also wraps pushToCloud so sync
         doesn't depend on the broken sync_queue drain.
+
+   NEW in v3.1 (20260410f):
+    13. ONE-SHOT LOCAL RESET. The Supabase `books` table was wiped
+        clean on 2026-04-10 at the user's explicit request to
+        prepare for the 56k bulk import. Every device that still
+        has stale rows in its IndexedDB MUST also be wiped, or
+        the next sync will re-upload the old data.
+
+        This patch runs a guarded one-shot cleaner on load:
+          - checks localStorage.lib_reset_marker
+          - if not '20260410f-reset-v1':
+              * clears IndexedDB `books` store
+              * clears IndexedDB `sync_queue` store
+              * sets the marker
+              * logs to console as [PATCH 20260410f] reset-local
+        After the marker is set, the block is a no-op forever.
    ============================================================ */
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410e';
+  var PATCH_VERSION = '20260410f';
+  var RESET_MARKER  = '20260410f-reset-v1';
   function LOG() {
     try {
       var a = ['[PATCH ' + PATCH_VERSION + ']'];
@@ -74,6 +91,61 @@
   window.__patchErrors = [];   // first few non-2xx response bodies
   window.__patchVersion = PATCH_VERSION;
   var patchStats = window.__patchStats;
+
+  /* -----------------------------------------------------------
+     ONE-SHOT LOCAL RESET (v3.1, 20260410f)
+     Wipes the local `books` and `sync_queue` stores ONCE on the
+     first load of this patch version per browser. After the
+     marker is set in localStorage, this block is a no-op.
+     ----------------------------------------------------------- */
+  (function oneShotLocalReset() {
+    try {
+      var marker = null;
+      try { marker = localStorage.getItem('lib_reset_marker'); } catch (e) {}
+      if (marker === RESET_MARKER) {
+        LOG('reset-local already applied, skipping');
+        return;
+      }
+      LOG('reset-local: marker missing or stale, wiping local stores');
+      var req = indexedDB.open('LibraryInventoryDB');
+      req.onsuccess = function () {
+        try {
+          var db = req.result;
+          var stores = [];
+          if (db.objectStoreNames.contains('books'))      stores.push('books');
+          if (db.objectStoreNames.contains('sync_queue')) stores.push('sync_queue');
+          if (stores.length === 0) {
+            try { localStorage.setItem('lib_reset_marker', RESET_MARKER); } catch (e) {}
+            db.close();
+            LOG('reset-local: no target stores present, marker set');
+            return;
+          }
+          var tx = db.transaction(stores, 'readwrite');
+          stores.forEach(function (name) {
+            try {
+              var st = tx.objectStore(name);
+              var countReq = st.count();
+              countReq.onsuccess = function () {
+                var n = countReq.result || 0;
+                st.clear();
+                LOG('reset-local: cleared store ' + name + ' (' + n + ' rows)');
+              };
+            } catch (e) { WARN('reset-local clear error for ' + name + ':', e && e.message); }
+          });
+          tx.oncomplete = function () {
+            try { localStorage.setItem('lib_reset_marker', RESET_MARKER); } catch (e) {}
+            LOG('reset-local: complete, marker set to ' + RESET_MARKER);
+            db.close();
+          };
+          tx.onerror = function () {
+            WARN('reset-local: tx error, marker NOT set');
+            try { db.close(); } catch (e) {}
+          };
+        } catch (e) { WARN('reset-local inner error:', e && e.message); }
+      };
+      req.onerror = function () { WARN('reset-local: IDB open error'); };
+    } catch (e) { WARN('reset-local outer error:', e && e.message); }
+  })();
 
   /* -----------------------------------------------------------
      BUG 4: Nuke stale sync_queue on startup
