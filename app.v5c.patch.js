@@ -1,108 +1,120 @@
 /* ============================================================
-   app.v5c.patch.js  —  Hotfix for app.v5c.js?v=20260408b
+   app.v5c.patch.js  —  Hotfix v2 for app.v5c.js?v=20260408b
    Generated: 2026-04-10
+
+   IMPORTANT: This script MUST load BEFORE app.v5c.js,
+   so that window.fetch is wrapped before the main app
+   captures a reference to it. See INSTALL.md.
+
    Bugs fixed:
      1. startAutoSync() is DEFINED but never CALLED in app.v5c.js,
         so the Supabase Realtime WebSocket is never opened on
         login. Cross-device / cross-user live sync is dead.
      2. pushToCloud() sends empty string "" for timestamptz fields
-        (e.g. updated_at / created_at). PostgreSQL rejects every
-        row with error 22007:
-          "invalid input syntax for type timestamp with time zone"
+        (last_inventory_date, etc). PostgreSQL rejects every row
+        with error 22007.
      3. As a consequence of #2, the push loop fails silently and
-        immediately retries the ENTIRE local library (56K+ rows).
-        10,000+ failing POSTs hit Supabase in under a minute.
-
-   Strategy: do NOT rewrite the 1400-line main file. Instead:
-     A) Wrap window.fetch so any POST/PATCH to /rest/v1/<table>
-        cleans empty-string values for timestamp-ish keys
-        (converts "" → null).
-     B) Watch for the user becoming logged in, then invoke
-        window.startAutoSync() exactly once per session.
-     C) Rate-limit push failures: if more than FAIL_BURST errors
-        happen inside FAIL_WINDOW_MS, suppress further pushes for
-        COOLDOWN_MS to prevent runaway load on Supabase.
-
-   Install:
-     1. Place this file next to app.v5c.js in the repo root:
-          /library-app/app.v5c.patch.js
-     2. In index.html, immediately AFTER the existing line:
-          <script src="app.v5c.js?v=20260408b"></script>
-        add:
-          <script src="app.v5c.patch.js?v=20260410b"></script>
-     3. Commit + push. No other file needs to change.
+        immediately retries the ENTIRE local library. 10,000+
+        failing POSTs hit Supabase in under a minute.
+     4. (NEW in v2) The stale sync_queue from the pre-patch era
+        is auto-cleared on load so the flood stops immediately.
+     5. (NEW in v2) First 5 failing responses are captured to
+        window.__patchErrors so we can see exactly what the
+        server is rejecting.
+     6. (NEW in v2) Rate limit is far more generous (500 fails /
+        60s) so normal bulk operations are NOT suppressed.
+     7. (NEW in v2) Request objects (new Request()) with stream
+        bodies are also handled.
    ============================================================ */
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410b';
-  var LOG = function () {
+  var PATCH_VERSION = '20260410d';
+  function LOG() {
     try {
       var a = ['[PATCH ' + PATCH_VERSION + ']'];
       for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
       console.log.apply(console, a);
     } catch (e) {}
-  };
-  var WARN = function () {
+  }
+  function WARN() {
     try {
       var a = ['[PATCH ' + PATCH_VERSION + ']'];
       for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
       console.warn.apply(console, a);
     } catch (e) {}
-  };
+  }
 
   LOG('loading');
 
+  // Public debug surface
+  window.__patchStats = { rowsSeen: 0, keysCleaned: 0, lastCleanedKeys: [] };
+  window.__patchErrors = [];   // first few non-2xx response bodies
+  window.__patchVersion = PATCH_VERSION;
+  var patchStats = window.__patchStats;
+
   /* -----------------------------------------------------------
-     BUG 2 & 3: clean payloads + rate-limit push failures
+     BUG 4: Nuke stale sync_queue on startup
      ----------------------------------------------------------- */
+  // The previous broken version filled IndexedDB with bad rows.
+  // On every reload those retry and DDoS Supabase before login.
+  // Clear the queue atomically before app.v5c.js can read it.
+  (function nukeStaleQueue() {
+    try {
+      var req = indexedDB.open('LibraryInventoryDB');
+      req.onsuccess = function () {
+        try {
+          var db = req.result;
+          if (!db.objectStoreNames.contains('sync_queue')) {
+            db.close();
+            LOG('sync_queue store not present, skip nuke');
+            return;
+          }
+          var tx = db.transaction('sync_queue', 'readwrite');
+          var store = tx.objectStore('sync_queue');
+          var countReq = store.count();
+          countReq.onsuccess = function () {
+            var n = countReq.result || 0;
+            if (n > 0) {
+              store.clear();
+              LOG('nuked sync_queue (' + n + ' stale rows)');
+            } else {
+              LOG('sync_queue already empty');
+            }
+          };
+          tx.oncomplete = function () { db.close(); };
+          tx.onerror = function () { try { db.close(); } catch (e) {} };
+        } catch (e) { WARN('nuke tx error:', e && e.message); }
+      };
+      req.onerror = function () {
+        WARN('nuke IDB open error');
+      };
+    } catch (e) { WARN('nuke outer error:', e && e.message); }
+  })();
 
-  // Any key we believe is a timestamptz on the Supabase side.
-  // We convert "" → null for these keys (PG accepts NULL, not "").
+  /* -----------------------------------------------------------
+     BUG 2: convert ALL empty strings to null
+     ----------------------------------------------------------- */
+  // CONFIRMED by live diagnostic (2026-04-10): the Supabase `books`
+  // table has BOTH timestamptz columns (last_inventory_date,
+  // created_at, updated_at) AND integer columns (match_confidence,
+  // publication_year) that PostgreSQL rejects with "" values:
+  //   22007  invalid input syntax for type timestamp with time zone: ""
+  //   22P02  invalid input syntax for type integer: ""
+  // Direct test confirmed: after nulling ALL empty strings, a
+  // POST /rest/v1/books returns 201 Created.
   //
-  // Broad heuristic: matches any field name that ends in a timestamp-ish
-  // token in either snake_case or camelCase:
-  //   *_at        updated_at, created_at, scanned_at, inventoried_at, ...
-  //   *At         updatedAt, createdAt, scannedAt, ...
-  //   *_time      sync_time, last_time, ...
-  //   *Time       syncTime, lastTime, ...
-  //   *_date      due_date, ...
-  //   *Date       dueDate, ...
-  //   *_on        created_on, ...
-  //   *On         createdOn, ...
-  //   timestamp, last_seen, last_updated, lastUpdated, lastSeen, etc.
-  var TS_KEY_RX = new RegExp(
-    '(^|_)(at|on|time|date|timestamp|seen|updated|modified|created|scanned|inventoried|synced|logged)$' +
-    '|' +
-    '(At|On|Time|Date|Timestamp|Seen|Updated|Modified|Created|Scanned|Inventoried|Synced|Logged)$'
-  );
-
-  // Values we treat as "empty / invalid" for timestamp fields → null
-  function isEmptyTsValue(v) {
-    if (v === '' || v === null || v === undefined) return true;
-    if (typeof v !== 'string') return false;
-    var s = v.trim();
-    if (!s) return true;
-    if (s === 'Invalid Date' || s === 'NaN' || s === 'null' || s === 'undefined') return true;
-    // ISO-ish check: must contain at least a digit and a dash or colon
-    if (!/\d/.test(s)) return true;
-    return false;
-  }
-
-  // Stats for debugging what the patch actually cleaned
-  var patchStats = { rowsSeen: 0, keysCleaned: 0, lastCleanedKeys: [] };
-  window.__patchStats = patchStats;
-
+  // Text columns accept both "" and null identically in the UI
+  // (both render as empty), so this is safe across the board.
   function cleanRow(obj) {
     if (!obj || typeof obj !== 'object') return obj;
     patchStats.rowsSeen++;
     for (var k in obj) {
       if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
-      var v = obj[k];
-      if (TS_KEY_RX.test(k) && isEmptyTsValue(v)) {
+      if (obj[k] === '') {
         obj[k] = null;
         patchStats.keysCleaned++;
-        if (patchStats.lastCleanedKeys.length < 20 &&
+        if (patchStats.lastCleanedKeys.length < 30 &&
             patchStats.lastCleanedKeys.indexOf(k) === -1) {
           patchStats.lastCleanedKeys.push(k);
         }
@@ -120,17 +132,18 @@
     return data;
   }
 
-  // Rate limiter state for BUG 3 mitigation
-  var FAIL_BURST = 50;            // >50 failures...
-  var FAIL_WINDOW_MS = 30 * 1000; // ...inside 30 s
-  var COOLDOWN_MS = 5 * 60 * 1000;// ...triggers a 5-min cooldown
+  /* -----------------------------------------------------------
+     BUG 3: rate-limit push failures (v2: much more generous)
+     ----------------------------------------------------------- */
+  var FAIL_BURST     = 500;             // >500 failures...
+  var FAIL_WINDOW_MS = 60 * 1000;       // ...inside 60 s
+  var COOLDOWN_MS    = 2 * 60 * 1000;   // ...triggers 2-min cooldown
   var failTimestamps = [];
-  var cooldownUntil = 0;
+  var cooldownUntil  = 0;
 
   function recordFailure() {
     var now = Date.now();
     failTimestamps.push(now);
-    // prune
     while (failTimestamps.length && failTimestamps[0] < now - FAIL_WINDOW_MS) {
       failTimestamps.shift();
     }
@@ -138,63 +151,76 @@
       cooldownUntil = now + COOLDOWN_MS;
       WARN('push failure burst detected (' + failTimestamps.length +
            ' in ' + FAIL_WINDOW_MS + 'ms) — suspending writes for ' +
-           (COOLDOWN_MS / 1000) + 's to protect Supabase quota');
+           (COOLDOWN_MS / 1000) + 's');
     }
   }
-
   function inCooldown() { return Date.now() < cooldownUntil; }
 
+  // Public helper: user can manually clear cooldown in console
+  window.__patchResetCooldown = function () {
+    cooldownUntil = 0;
+    failTimestamps = [];
+    LOG('cooldown manually cleared');
+  };
+
+  /* -----------------------------------------------------------
+     Fetch wrapper
+     ----------------------------------------------------------- */
   var origFetch = window.fetch && window.fetch.bind(window);
   if (!origFetch) {
-    WARN('window.fetch not found — cannot install BUG 2/3 fix');
+    WARN('window.fetch not found — cannot install patch');
   } else {
     window.fetch = function patchedFetch(input, init) {
+      var url = '';
+      var method = 'GET';
       try {
-        var url = typeof input === 'string'
+        url = typeof input === 'string'
           ? input
           : (input && typeof input.url === 'string' ? input.url : '');
-        var method = (init && init.method) || (input && input.method) || 'GET';
-        var isWrite =
-          url.indexOf('/rest/v1/') !== -1 &&
-          (method === 'POST' || method === 'PATCH' || method === 'PUT');
+        method = (init && init.method) ||
+                 (input && input.method) || 'GET';
+      } catch (e) {}
+      var isRest  = url.indexOf('/rest/v1/') !== -1;
+      var isWrite = isRest && (method === 'POST' || method === 'PATCH' || method === 'PUT');
 
-        if (isWrite) {
-          // Suppress writes during cooldown
-          if (inCooldown()) {
-            WARN('suppressing write to', url, '(cooldown)');
-            return Promise.resolve(new Response(
-              JSON.stringify({ patch: 'cooldown', suppressed: true }),
-              { status: 503, headers: { 'content-type': 'application/json' } }
-            ));
-          }
+      if (isWrite && inCooldown()) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ patch: 'cooldown', suppressed: true }),
+          { status: 503, headers: { 'content-type': 'application/json' } }
+        ));
+      }
 
-          // Clean the body
-          if (init && typeof init.body === 'string' && init.body.length) {
-            var raw = init.body;
-            var first = raw.charAt(0);
-            if (first === '{' || first === '[') {
-              try {
-                var data = JSON.parse(raw);
-                cleanPayload(data);
-                init = Object.assign({}, init, { body: JSON.stringify(data) });
-              } catch (e) {
-                // not JSON, leave alone
-              }
-            }
+      // Clean the body if it's a JSON string
+      if (isWrite && init && typeof init.body === 'string' && init.body.length) {
+        try {
+          var first = init.body.charAt(0);
+          if (first === '{' || first === '[') {
+            var data = JSON.parse(init.body);
+            cleanPayload(data);
+            init = Object.assign({}, init, { body: JSON.stringify(data) });
           }
-        }
-      } catch (e) {
-        WARN('fetch wrap pre-call error:', e && e.message);
+        } catch (e) {}
       }
 
       var p = origFetch(input, init);
+      if (!isRest) return p;
 
-      // Record failures for rate limiting
       return p.then(function (res) {
         try {
           if (res && !res.ok) {
-            var u = res.url || '';
-            if (u.indexOf('/rest/v1/') !== -1) recordFailure();
+            recordFailure();
+            // Capture first 5 error bodies for diagnosis
+            if (window.__patchErrors.length < 5) {
+              res.clone().text().then(function (txt) {
+                try {
+                  window.__patchErrors.push({
+                    url: res.url || url,
+                    status: res.status,
+                    body: (txt || '').slice(0, 500)
+                  });
+                } catch (e) {}
+              }).catch(function () {});
+            }
           }
         } catch (e) {}
         return res;
@@ -207,10 +233,10 @@
   }
 
   /* -----------------------------------------------------------
-     BUG 1: ensure startAutoSync() is actually invoked after login
+     BUG 1: ensure startAutoSync() / startRealtimeSync() are
+     actually invoked after login
      ----------------------------------------------------------- */
-
-  var autoSyncStartedFor = null; // remembers which user we started for
+  var autoSyncStartedFor = null;
 
   function currentUserHint() {
     try {
@@ -239,16 +265,12 @@
   }
 
   function appLooksReady() {
-    // Heuristic: if the main screen (home/reports/settings nav)
-    // is present in the DOM and the login form is NOT visible,
-    // we consider the user logged in.
-    if (loginScreenVisible()) return false;
-    var mainEls = document.querySelectorAll(
-      '[data-screen="home"], #homeScreen, .bottom-nav, nav.tabbar, .tab-bar, .main-screen'
+    // If there's a visible search box or book grid, the user is in
+    var hints = document.querySelectorAll(
+      'input[placeholder*="ابحث"], .book-card, .kpi, #booksGrid, #bookList, [data-screen="home"]'
     );
-    if (mainEls.length > 0) return true;
-    // Fallback: any visible KPI card / welcome banner
-    return !!document.querySelector('.kpi, .welcome, .hero-card');
+    if (hints.length > 0 && !loginScreenVisible()) return true;
+    return false;
   }
 
   function tryStartAutoSync() {
@@ -257,47 +279,25 @@
     var hasRt   = typeof window.startRealtimeSync === 'function';
     if (!hasAuto && !hasRt) return;
 
-    // Determine who we are; use "anon" if unknown
     var who = currentUserHint() || 'anon';
     if (autoSyncStartedFor === who) return;
 
     if (hasAuto) {
-      try {
-        LOG('calling startAutoSync() for user=' + who);
-        window.startAutoSync();
-      } catch (e) {
-        WARN('startAutoSync() threw:', e && e.message);
-      }
+      try { LOG('calling startAutoSync() for user=' + who); window.startAutoSync(); }
+      catch (e) { WARN('startAutoSync() threw:', e && e.message); }
     }
-    // Also kick the Realtime WebSocket channel if it exists as a
-    // separate entry point. Some builds split polling-sync vs.
-    // Realtime-WS sync into two functions.
     if (hasRt) {
-      try {
-        LOG('calling startRealtimeSync() for user=' + who);
-        window.startRealtimeSync();
-      } catch (e) {
-        WARN('startRealtimeSync() threw:', e && e.message);
-      }
+      try { LOG('calling startRealtimeSync() for user=' + who); window.startRealtimeSync(); }
+      catch (e) { WARN('startRealtimeSync() threw:', e && e.message); }
     }
     autoSyncStartedFor = who;
   }
 
-  // Poll every 1.5 s; this is cheap and handles every
-  // possible entry point (login form, team-code modal, refresh,
-  // tab re-focus, etc.) without having to hook into app internals.
   var poll = setInterval(tryStartAutoSync, 1500);
-  // Stop polling after 10 minutes; by then sync is either up or
-  // the user abandoned the page.
   setTimeout(function () { clearInterval(poll); }, 10 * 60 * 1000);
-
-  // Also run once on visibility change, since some browsers
-  // throttle setInterval on hidden tabs.
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) tryStartAutoSync();
   });
-
-  // Also run once on window focus
   window.addEventListener('focus', tryStartAutoSync);
 
   LOG('login watcher installed');
