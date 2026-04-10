@@ -52,7 +52,9 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410h';
+  var PATCH_VERSION = '20260410i';
+  // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
+  // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
 
   function LOG() {
@@ -205,23 +207,36 @@
   window.__patchResetCooldown = function () { cooldownUntil = 0; failTimestamps = []; };
 
   /* -----------------------------------------------------------
-     UI refresh (debounced)
+     UI refresh (debounced, PAGE-AWARE)
+     v4i: previously called loadHome + loadAllBooks + loadReports
+     unconditionally which caused the whole app to freeze for ~200-500ms
+     on every local write because generateReports() iterates all 56K books
+     and classifies each one with ~16 regexes. Now we only call the
+     render function for the CURRENTLY visible page. Everything else
+     gets refreshed lazily when the user actually navigates to it.
      ----------------------------------------------------------- */
   var uiRefreshDebounce = null;
   function scheduleUIRefresh(source) {
     clearTimeout(uiRefreshDebounce);
     uiRefreshDebounce = setTimeout(function () {
       try {
-        var fns = ['loadHome', 'renderHome', 'loadAllBooks', 'refreshUI', 'renderBooks', 'updateSyncBadge', 'loadReports'];
-        var called = 0;
-        for (var i = 0; i < fns.length; i++) {
-          var fn = window[fns[i]];
-          if (typeof fn === 'function') { try { fn(); called++; } catch (e) {} }
-        }
+        // Always update the sync badge — it's cheap and users expect it.
+        try { if (typeof window.updateSyncBadge === 'function') window.updateSyncBadge(); } catch (e) {}
+        // Find the currently visible page and refresh ONLY it.
+        var active = document.querySelector('.page.active');
+        var id = active ? active.id : '';
+        var fn = null;
+        if      (id === 'pgHome')     fn = window.loadHome    || window.renderHome;
+        else if (id === 'pgReports')  fn = window.loadReports;
+        else if (id === 'pgAllBooks') fn = window.loadAllBooks;
+        else if (id === 'pgReview')   fn = window.loadReview;
+        else if (id === 'pgSearch')   fn = window.refreshSearch || window.loadSearch;
+        // pgDetail, pgAdd, pgImport, pgSettings, pgScan: no auto-refresh needed
+        if (typeof fn === 'function') { try { fn(); } catch (e) {} }
         if (source === 'realtime') patchStats.realtimeRefreshes++;
         else patchStats.localRefreshes++;
       } catch (e) {}
-    }, 200);
+    }, 350);
   }
 
   /* -----------------------------------------------------------
@@ -541,7 +556,31 @@
     }
     return 'غير مصنّف';
   }
-  window.extractCategory = extractCategory;
+  // v4i: memoize extractCategory so 56K × ~16 regex tests
+  // don't run on every generateReports call. The cache is keyed by
+  // record_id (stable) with small fallbacks, and is invalidated
+  // whenever a book write happens (see invalidateCategoryCache below).
+  var __catCache = Object.create(null);
+  var __catCacheSize = 0;
+  function extractCategoryMemo(book) {
+    if (!book) return 'غير مصنّف';
+    var k = book.record_id || book.cloud_id || book.bib;
+    if (k != null && __catCache[k] != null) return __catCache[k];
+    var r = extractCategory(book);
+    if (k != null) {
+      __catCache[k] = r;
+      __catCacheSize++;
+      // Safety cap: never let the cache balloon past ~100K entries
+      if (__catCacheSize > 100000) { __catCache = Object.create(null); __catCacheSize = 0; }
+    }
+    return r;
+  }
+  function invalidateCategoryCache(recordId) {
+    if (recordId == null) { __catCache = Object.create(null); __catCacheSize = 0; return; }
+    if (__catCache[recordId] != null) { delete __catCache[recordId]; __catCacheSize--; }
+  }
+  window.extractCategory = extractCategoryMemo;
+  window.__invalidateCategoryCache = invalidateCategoryCache;
 
   /* ===========================================================
      V4 NEW #16 — generateReports(books)
@@ -552,7 +591,6 @@
     var categories = {};
     var sources = {};
     var users = {};  // { name: { added: n, inventoried: n } }
-    var types = {};
     var withCover = 0;
 
     for (var i = 0; i < books.length; i++) {
@@ -563,14 +601,12 @@
       else if (st === 'Damaged' || st === 'تالف') damaged++;
       else unchecked++;
 
-      var cat = extractCategory(b);
+      // v4i: use the memoized version so repeat calls are O(1) lookups.
+      var cat = extractCategoryMemo(b);
       categories[cat] = (categories[cat] || 0) + 1;
 
       var src = b.library_source || b.source_db || 'غير محدد';
       sources[src] = (sources[src] || 0) + 1;
-
-      var t = b.doctype || b.material_type || 'غير محدد';
-      types[t] = (types[t] || 0) + 1;
 
       var added = b.added_by;
       if (added) {
@@ -588,6 +624,16 @@
     var checked = total - unchecked;
     var percent = total > 0 ? Math.round((checked / total) * 1000) / 10 : 0;
 
+    // v4i: replaced the meaningless `types` field (which grouped by raw
+    // Dewey call number from the `doctype` column) with `statusDistribution`
+    // — four immediately useful inventory status buckets.
+    var statusDistribution = {
+      'موجود':       present,
+      'مفقود':       lost,
+      'تالف':        damaged,
+      'غير مفحوص':  unchecked
+    };
+
     return {
       total: total,
       present: present,
@@ -599,7 +645,7 @@
       withCover: withCover,
       categories: categories,
       sources: sources,
-      types: types,
+      statusDistribution: statusDistribution,
       users: users
     };
   }
@@ -648,7 +694,9 @@
     if (!pg) return;
 
     // Ensure the new report DOM is present; if not, inject it.
-    if (!document.getElementById('repTotal')) {
+    // v4i: also regenerate when the old v4h typeChart is still present
+    // (so upgraded users get the new status chart without a hard reload).
+    if (!document.getElementById('repTotal') || !document.getElementById('statusChart')) {
       pg.innerHTML = ''
         + '<h2 class="page-title">التقارير والإحصائيات</h2>'
         + '<div class="stats-grid">'
@@ -660,7 +708,7 @@
         + '</div>'
         + '<div class="report-section"><h3>توزيع التصنيفات</h3><div id="categoryChart" class="chart-box"></div></div>'
         + '<div class="report-section"><h3>التوزيع حسب المصدر</h3><div id="sourceChart" class="chart-box"></div></div>'
-        + '<div class="report-section"><h3>التوزيع حسب النوع</h3><div id="typeChart" class="chart-box"></div></div>'
+        + '<div class="report-section"><h3>التوزيع حسب حالة الجرد</h3><div id="statusChart" class="chart-box"></div></div>'
         + '<div class="report-section"><h3>أداء المستخدمين</h3>'
         + '  <table class="perf-table" id="userPerf"><thead><tr><th>المستخدم</th><th>إضافات</th><th>جرود</th></tr></thead><tbody></tbody></table>'
         + '</div>'
@@ -683,9 +731,10 @@
       setTxt('repUnchecked', fmtNum(r.unchecked));
       setTxt('repPercent',   fmtPct(r.percent));
 
-      renderBarChart('categoryChart', r.categories, { limit: 15, color: 'var(--teal)' });
-      renderBarChart('sourceChart',   r.sources,    { limit: 10, color: 'var(--gold)' });
-      renderBarChart('typeChart',     r.types,      { limit: 10, color: 'var(--teal-light)' });
+      renderBarChart('categoryChart', r.categories,         { limit: 15, color: 'var(--teal)' });
+      renderBarChart('sourceChart',   r.sources,            { limit: 10, color: 'var(--gold)' });
+      // v4i: status distribution instead of raw doctype call numbers
+      renderBarChart('statusChart',   r.statusDistribution, { limit: 10, color: 'var(--coral)' });
 
       // User performance table
       var ub = document.querySelector('#userPerf tbody');
@@ -1066,13 +1115,15 @@
           if (!isChange) return;
           realtimeEventsSinceLastPull++;
           clearTimeout(realtimeBatchTimer);
-          // Batch realtime events: wait 800ms of silence, then do ONE pull+refresh
+          // v4i: bumped silence window from 800ms to 1500ms to further
+          // coalesce rapid bursts of realtime events, which were adding
+          // noticeable jank when multiple clients wrote at once.
           realtimeBatchTimer = setTimeout(function () {
             var n = realtimeEventsSinceLastPull;
             realtimeEventsSinceLastPull = 0;
             LOG('realtime batch: ' + n + ' events → single paginated pull');
             paginatedPullFromCloud().catch(function () {});
-          }, 800);
+          }, 1500);
         } catch (e) {}
       };
       realtimeHookedWs = ws;
