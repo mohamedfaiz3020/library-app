@@ -1462,6 +1462,19 @@
 
     // ---------- UPDATE existing (O(1) via index) ----------
     if (localId != null) {
+      // v4q: if this local record is pinned by a recent reset, the
+      // pin is authoritative — skip this realtime update entirely so
+      // we never overwrite fresh Not Checked state with a stale or
+      // echo event.
+      try {
+        if (typeof __v4qPinnedResets !== 'undefined' && __v4qPinnedResets.size > 0) {
+          var __pinNow = Date.now();
+          var __pinEnt = __v4qPinnedResets.get(localId);
+          if (__pinEnt && __pinEnt.until > __pinNow) {
+            return Promise.resolve(true);
+          }
+        }
+      } catch (e) {}
       var upd = Object.assign({}, record);
       upd.record_id = localId;
       upd.cloud_id  = cloudId;
@@ -2015,7 +2028,12 @@
        8. Reset is rejected if cloud_id is missing or offline.
      =========================================================== */
   var __v4qPinnedResets = new Map(); // record_id -> { book, until }
-  var __V4Q_PIN_TTL_MS = 15000;
+  // Pin TTL: long enough to cover the worst-case in-flight dbAll read
+  // (which can take up to ~30s on 56K books if it races against a
+  // paginatedPullFromCloud merge). Too-short TTL leaves a window where
+  // a stale dbAll promise resolves AFTER the pin expires, then v4j's
+  // rebuildBookMap writes stale Found back into __bookMap.
+  var __V4Q_PIN_TTL_MS = 60000;
 
   function __v4qCleanExpiredPins() {
     var now = Date.now();
@@ -2230,10 +2248,12 @@
       // Pin for 15s — protects against in-flight pulls and realtime bursts
       __v4qPinReset(newBook, __V4Q_PIN_TTL_MS);
 
-      // Defensive re-assertions in case something slipped through
-      setTimeout(function () { __v4qApplyPinned(newBook); }, 1500);
-      setTimeout(function () { __v4qApplyPinned(newBook); }, 5000);
-      setTimeout(function () { __v4qApplyPinned(newBook); }, 10000);
+      // Defensive re-assertions across the full 60s pin lifetime.
+      // These are idempotent and catch any stale read (dbAll, pull,
+      // realtime) that resolves during the window.
+      [1500, 5000, 10000, 20000, 35000, 55000].forEach(function (ms) {
+        setTimeout(function () { __v4qApplyPinned(newBook); }, ms);
+      });
 
       if (typeof window.showToast === 'function') window.showToast('✅ أُرجع إلى غير مفحوص');
       if (typeof window.showDet === 'function') {
