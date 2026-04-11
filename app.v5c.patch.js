@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410k';
+  var PATCH_VERSION = '20260410l';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -233,10 +233,10 @@
         else if (id === 'pgSearch')   fn = window.refreshSearch || window.loadSearch;
         // pgDetail, pgAdd, pgImport, pgSettings, pgScan: no auto-refresh needed
         if (typeof fn === 'function') { try { fn(); } catch (e) {} }
-        if (source === 'realtime') patchStats.realtimeRefreshes++;
+        if (source === 'realtime' || (source && source.indexOf('realtime') !== -1)) patchStats.realtimeRefreshes++;
         else patchStats.localRefreshes++;
       } catch (e) {}
-    }, 350);
+    }, 120); // v4l: 350→120ms for snappier cross-device updates
   }
 
   /* -----------------------------------------------------------
@@ -253,13 +253,18 @@
           Promise.resolve(window.pushToCloud())
             .then(function () {
               scheduleUIRefresh('local-after-push');
-              if (typeof window.pullFromCloud === 'function') return window.pullFromCloud();
+              // v4l: after push, do a LIGHT delta pull (not full 56K pull)
+              // so we pick up any concurrent changes from other devices.
+              // Realtime broadcast will also kick in.
+              if (typeof window.__pullDeltaSince === 'function') {
+                return window.__pullDeltaSince();
+              }
             })
             .then(function () { scheduleUIRefresh('local-after-pull'); })
             .catch(function () {});
         }
       } catch (e) {}
-    }, 400);
+    }, 150); // v4l: 400→150ms — faster propagation after local write
   }
   window.__patchFlushQueue = function () {
     clearTimeout(pushDebounce);
@@ -1033,12 +1038,18 @@
     }
     html += '</div>';
 
-    // Action buttons
+    // Action buttons — v4l: use the REAL functions defined in index.html
+    // (cfDirect + markNF). The v4i buttons called markFound/markLost/editBook
+    // which never existed, so clicks from list→detail silently did nothing.
     html += '<div class="detail-actions">';
-    html += '  <button class="btn btn-teal" onclick="markFound(' + b.record_id + ')">✓ جرد موجود</button>';
-    html += '  <button class="btn btn-coral" onclick="markLost(' + b.record_id + ')">✗ مفقود</button>';
-    html += '  <button class="btn btn-gold" onclick="editBook(' + b.record_id + ')">✎ تعديل</button>';
-    html += '  <button class="btn btn-ghost" onclick="history.back()">↩ رجوع</button>';
+    if (b.inventory_status !== 'Found') {
+      html += '  <button class="btn btn-teal" onclick="cfDirect(' + b.record_id + ')">✅ تأكيد الجرد</button>';
+    }
+    html += '  <button class="btn btn-coral" onclick="markNF(' + b.record_id + ')">❌ غير موجود</button>';
+    if (b.internal_barcode) {
+      html += '  <button class="btn btn-gold" onclick="showBC(\'' + escHtml(String(b.internal_barcode)) + '\')">📊 الباركود</button>';
+    }
+    html += '  <button class="btn btn-ghost" onclick="goBack()">↩ رجوع</button>';
     html += '</div>';
 
     // Sections
@@ -1187,11 +1198,149 @@
   }
 
   /* ===========================================================
-     Realtime hook — BATCHED refresh, does NOT call pull per event
+     v4l — Realtime FAST PATH + delta pull
+     =========================================================== */
+  // Apply a single realtime record inline: no fetch, just IDB put +
+  // __bookMap update + UI refresh. This is how cross-device sync
+  // drops from 40s to sub-second.
+  var __lastDeltaIso = null;
+  function nowIso() { return new Date().toISOString(); }
+  function isoAgo(ms) { return new Date(Date.now() - ms).toISOString(); }
+
+  function applyRealtimeRecord(record, type) {
+    if (!record) return Promise.resolve(false);
+    // Track most recent updated_at seen so pullDelta can resume
+    try {
+      if (record.updated_at && (!__lastDeltaIso || record.updated_at > __lastDeltaIso)) {
+        __lastDeltaIso = record.updated_at;
+      }
+    } catch (e) {}
+    return openIDB().then(function (db) {
+      if (!db.objectStoreNames.contains('books')) { db.close(); return false; }
+      return new Promise(function (resolve) {
+        var tx = db.transaction('books', 'readwrite');
+        var store = tx.objectStore('books');
+        var getAllReq = store.getAll();
+        getAllReq.onsuccess = function () {
+          try {
+            var local = getAllReq.result || [];
+            var remoteId = record.record_id;
+            var match = null;
+            for (var i = 0; i < local.length; i++) {
+              if (local[i].cloud_id === remoteId) { match = local[i]; break; }
+            }
+            if (!match) {
+              var tk = (record.title || '').trim() + '|||' + (record.author || '').trim();
+              if (tk !== '|||') {
+                for (var j = 0; j < local.length; j++) {
+                  var lk = (local[j].title || '').trim() + '|||' + (local[j].author || '').trim();
+                  if (lk === tk) { match = local[j]; break; }
+                }
+              }
+            }
+            if (type === 'DELETE') {
+              if (match) store.delete(match.record_id);
+            } else if (match) {
+              var upd = Object.assign({}, record);
+              upd.record_id = match.record_id;
+              upd.cloud_id = remoteId;
+              store.put(upd);
+              // Update __bookMap in place
+              try {
+                if (window.__bookMap && match.record_id != null) {
+                  window.__bookMap.set(match.record_id, upd);
+                }
+              } catch (e) {}
+              try { invalidateCategoryCache(match.record_id); } catch (e) {}
+            } else {
+              // INSERT new
+              var nb = Object.assign({}, record);
+              nb.cloud_id = remoteId;
+              delete nb.record_id;
+              var addReq = store.add(nb);
+              addReq.onsuccess = function () {
+                try {
+                  if (window.__bookMap) {
+                    var saved = Object.assign({}, nb);
+                    saved.record_id = addReq.result;
+                    window.__bookMap.set(addReq.result, saved);
+                  }
+                } catch (e) {}
+              };
+            }
+          } catch (e) { WARN('applyRealtimeRecord inner:', e && e.message); }
+        };
+        tx.oncomplete = function () { db.close(); resolve(true); };
+        tx.onerror    = function () { try { db.close(); } catch (e) {} resolve(false); };
+        tx.onabort    = function () { try { db.close(); } catch (e) {} resolve(false); };
+      });
+    });
+  }
+
+  // Delta pull: fetch only rows updated_at > since.
+  // Returns count merged. Falls back to full paginated pull if
+  // delta returns >= 1000 rows (indicates drift too big).
+  var deltaInFlight = null;
+  function pullDeltaSince(sinceIso) {
+    if (deltaInFlight) return deltaInFlight;
+    var cfg = getCfg();
+    if (!cfg.url || !cfg.key) return Promise.resolve(0);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return Promise.resolve(0);
+    var since = sinceIso || __lastDeltaIso || isoAgo(120000); // default: last 2 min
+    var endpoint = cfg.url + '/rest/v1/' + cfg.table +
+      '?select=*&updated_at=gt.' + encodeURIComponent(since) +
+      '&order=updated_at.asc&limit=1000';
+    deltaInFlight = (async function () {
+      var rows = [];
+      try {
+        var res = await origFetch(endpoint, {
+          headers: {
+            'apikey': cfg.key,
+            'Authorization': 'Bearer ' + cfg.key
+          }
+        });
+        if (!res.ok) { WARN('pullDelta non-ok', res.status); return 0; }
+        rows = await res.json();
+      } catch (e) { WARN('pullDelta fetch:', e && e.message); return 0; }
+      if (!rows || !rows.length) return 0;
+      LOG('pullDelta: ' + rows.length + ' changes since ' + since);
+      // If we got the full limit, there's likely drift — fall back to full pull
+      if (rows.length >= 1000) {
+        LOG('pullDelta: drift detected, running full paginated pull');
+        paginatedPullFromCloud().catch(function () {});
+        return rows.length;
+      }
+      // Apply each record inline
+      for (var i = 0; i < rows.length; i++) {
+        try { await applyRealtimeRecord(rows[i], 'UPDATE'); } catch (e) {}
+      }
+      scheduleUIRefresh('after-delta-pull');
+      return rows.length;
+    })();
+    deltaInFlight.finally(function () { setTimeout(function () { deltaInFlight = null; }, 100); });
+    return deltaInFlight;
+  }
+  window.__pullDeltaSince = pullDeltaSince;
+
+  /* ===========================================================
+     Realtime hook — v4l: INLINE apply + 300ms batch delta pull
      =========================================================== */
   var realtimeHookedWs = null;
   var realtimeBatchTimer = null;
   var realtimeEventsSinceLastPull = 0;
+
+  function extractRecordFromMsg(msg) {
+    // Supabase realtime payload variations:
+    //   msg.payload.data.record   (most common for postgres_changes)
+    //   msg.payload.record
+    //   msg.payload.new
+    //   msg.record
+    var p = msg && msg.payload;
+    if (!p) return { record: null, type: null };
+    var type = (p.data && p.data.type) || p.type || msg.event;
+    var record = (p.data && p.data.record) || p.record || p.new || (p.data && p.data.new) || null;
+    return { record: record, type: type };
+  }
 
   function installRealtimeHook() {
     var ws = window.realtimeWs;
@@ -1201,9 +1350,9 @@
     try {
       var origOnMessage = ws.onmessage;
       ws.onmessage = function (evt) {
-        // DO NOT call origOnMessage's pullFromCloud path — our pagination
-        // replacement is the authoritative pull. Still let the original
-        // handle any UI status bits it might do.
+        // Let the original still handle any UI status bits, but its
+        // pullFromCloud path is already redirected to our paginated pull
+        // (which we DON'T want firing on every event).
         try { if (origOnMessage) origOnMessage.call(this, evt); } catch (e) {}
         try {
           var msg; try { msg = JSON.parse(evt.data); } catch (e) { return; }
@@ -1213,23 +1362,54 @@
             (msg.payload && msg.payload.data &&
              (msg.payload.data.type === 'INSERT' || msg.payload.data.type === 'UPDATE' || msg.payload.data.type === 'DELETE'));
           if (!isChange) return;
+
+          // v4l FAST PATH: apply the record INLINE from the event payload.
+          // No network fetch — sub-second end-to-end.
+          var info = extractRecordFromMsg(msg);
+          if (info.record && info.record.record_id != null) {
+            applyRealtimeRecord(info.record, info.type || 'UPDATE').then(function () {
+              scheduleUIRefresh('realtime-inline');
+            }).catch(function () {});
+          }
+
+          // ALSO kick a short-window delta pull as safety net, in case we
+          // missed an earlier event or the inline apply didn't find the row.
+          // Batch to coalesce bursts, but short enough to feel instant.
           realtimeEventsSinceLastPull++;
           clearTimeout(realtimeBatchTimer);
-          // v4i: bumped silence window from 800ms to 1500ms to further
-          // coalesce rapid bursts of realtime events, which were adding
-          // noticeable jank when multiple clients wrote at once.
           realtimeBatchTimer = setTimeout(function () {
             var n = realtimeEventsSinceLastPull;
             realtimeEventsSinceLastPull = 0;
-            LOG('realtime batch: ' + n + ' events → single paginated pull');
-            paginatedPullFromCloud().catch(function () {});
-          }, 1500);
+            LOG('realtime batch: ' + n + ' events → delta pull');
+            pullDeltaSince(__lastDeltaIso || isoAgo(30000)).catch(function () {});
+          }, 300);
         } catch (e) {}
       };
       realtimeHookedWs = ws;
-      LOG('realtime hook installed (batched)');
+      LOG('v4l realtime hook installed (inline + delta)');
     } catch (e) {}
   }
+
+  // v4l: periodic delta poll — safety net if WebSocket dies silently.
+  // Much lighter than a full paginated pull: only pulls rows updated
+  // in the last N seconds.
+  var deltaPollTimer = null;
+  function startDeltaPoll() {
+    if (deltaPollTimer) return;
+    deltaPollTimer = setInterval(function () {
+      if (document.hidden) return;
+      if (!__lastDeltaIso) __lastDeltaIso = isoAgo(60000);
+      pullDeltaSince(__lastDeltaIso).catch(function () {});
+    }, 8000); // every 8s
+    LOG('v4l delta poll started (8s interval)');
+  }
+  // v4l: on tab visible, immediately run a delta pull (catch-up)
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) {
+      if (!__lastDeltaIso) __lastDeltaIso = isoAgo(120000);
+      pullDeltaSince(__lastDeltaIso).catch(function () {});
+    }
+  });
 
   /* ===========================================================
      startAutoSync poll
@@ -1416,6 +1596,8 @@
     if (hasRt)   { try { window.startRealtimeSync(); } catch (e) {} }
     // Kick an initial paginated pull once the user is logged in
     setTimeout(function () { try { paginatedPullFromCloud(); } catch (e) {} }, 1200);
+    // v4l: start the delta poll (8s) — safety net if WebSocket drops
+    try { startDeltaPoll(); } catch (e) {}
     autoSyncStartedFor = who;
   }
   var poll = setInterval(tryStartAutoSync, 1500);
