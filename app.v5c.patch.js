@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410l';
+  var PATCH_VERSION = '20260410m';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
