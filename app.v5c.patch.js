@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410p';
+  var PATCH_VERSION = '20260410q';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -1972,24 +1972,279 @@
     LOG('v4p nav hook installed');
   }
 
-  // --- (3) Reset inventory to "Not Checked" ---------------
+  /* ===========================================================
+     v4q (20260410q) — Reset-to-Not-Checked race fix
+     -----------------------------------------------------------
+     Bug history:
+       The original v4p reset did:
+         1. local mutate (empty-string wipe)
+         2. dbPut  → queueSync → push to cloud
+         3. fullSync 500ms later → pushToCloud + pullFromCloud
+
+       But paginatedPullFromCloud (patch.js #14) has TWO
+       fatal properties for a write-then-pull flow:
+         (a) no updated_at freshness check — it *uncondition-
+             ally* overwrites local with whatever the remote
+             row looks like at pull time.
+         (b) ~28s non-atomic snapshot: a pull that *started*
+             before the PATCH landed can *finish* after and
+             write stale Found data on top of the fresh
+             Not Checked state.
+         (c) Realtime WebSocket also triggers a pull after
+             any edit, piling the problem on.
+
+       Result: user clicks reset, UI flashes Not Checked, but
+       within a few seconds a late pull overwrites it back to
+       Found. On the next reset click the home counter for
+       Not Found jumps unexpectedly as stale data churns.
+
+     v4q fix:
+       1. Reset is a DIRECT PATCH to Supabase (bypass queueSync
+          and fullSync entirely), with correct column types
+          (null instead of '', match_confidence=0).
+       2. On PATCH success, write IDB directly via openIDB()
+          (bypass dbPut so queueSync is NOT enqueued).
+       3. Update __bookMap synchronously.
+       4. Pin the reset book in __v4qPinnedResets for 15s.
+       5. Overlay window.dbAll so pinned books replace whatever
+          stale state the underlying IDB has, AND so the pinned
+          state is re-asserted into __bookMap on every list read.
+       6. Wrap window.pullFromCloud so after a pull finishes,
+          every live pin is re-written into IDB + __bookMap.
+       7. Defensive re-asserts at +1.5s, +5s and +10s.
+       8. Reset is rejected if cloud_id is missing or offline.
+     =========================================================== */
+  var __v4qPinnedResets = new Map(); // record_id -> { book, until }
+  var __V4Q_PIN_TTL_MS = 15000;
+
+  function __v4qCleanExpiredPins() {
+    var now = Date.now();
+    var dead = [];
+    __v4qPinnedResets.forEach(function (v, k) { if (!v || v.until < now) dead.push(k); });
+    for (var i = 0; i < dead.length; i++) __v4qPinnedResets.delete(dead[i]);
+  }
+
+  function __v4qGetPin(id) {
+    __v4qCleanExpiredPins();
+    if (__v4qPinnedResets.size === 0) return null;
+    var e = __v4qPinnedResets.get(id);
+    if (!e) {
+      var n = parseInt(id, 10);
+      if (!isNaN(n)) e = __v4qPinnedResets.get(n);
+      if (!e) e = __v4qPinnedResets.get(String(id));
+    }
+    return e ? e.book : null;
+  }
+
+  function __v4qPinReset(book, ttlMs) {
+    if (!book || book.record_id == null) return;
+    __v4qPinnedResets.set(book.record_id, {
+      book: book,
+      until: Date.now() + (ttlMs || __V4Q_PIN_TTL_MS)
+    });
+  }
+
+  // Self-contained IDB write (does NOT go through dbPut, so no
+  // queueSync entry and no fullSync will be triggered).
+  function __v4qRewriteIdb(book) {
+    return new Promise(function (resolve) {
+      openIDB().then(function (db) {
+        try {
+          if (!db.objectStoreNames.contains('books')) { db.close(); resolve(false); return; }
+          var tx = db.transaction('books', 'readwrite');
+          var store = tx.objectStore('books');
+          store.put(book);
+          tx.oncomplete = function () { db.close(); resolve(true); };
+          tx.onerror    = function () { try { db.close(); } catch (e) {} resolve(false); };
+          tx.onabort    = function () { try { db.close(); } catch (e) {} resolve(false); };
+        } catch (e) {
+          try { db.close(); } catch (ex) {}
+          resolve(false);
+        }
+      }).catch(function () { resolve(false); });
+    });
+  }
+
+  function __v4qApplyPinned(book) {
+    if (!book || book.record_id == null) return;
+    try { if (window.__bookMap) window.__bookMap.set(book.record_id, book); } catch (e) {}
+    __v4qRewriteIdb(book);
+  }
+
+  // Outer dbAll overlay: runs on top of the v4j-patched dbAll and
+  // substitutes pinned books in the result array + __bookMap.
+  // We set __v4jPatched=true on our wrapper so installDbAllHook
+  // sees it's already patched and doesn't re-wrap, stripping us.
+  function __v4qInstallDbAllOverlay() {
+    if (typeof window.dbAll !== 'function') return;
+    if (window.dbAll.__v4qPatched) return; // already outermost
+    var orig = window.dbAll;
+    var wrapped = function __v4qDbAll() {
+      var p = orig.apply(this, arguments);
+      return Promise.resolve(p).then(function (books) {
+        try {
+          if (!Array.isArray(books)) return books;
+          __v4qCleanExpiredPins();
+          if (__v4qPinnedResets.size === 0) return books;
+          var patched = 0;
+          for (var j = 0; j < books.length; j++) {
+            var b = books[j];
+            if (!b || b.record_id == null) continue;
+            var pin = __v4qPinnedResets.get(b.record_id);
+            if (pin && pin.book) {
+              books[j] = pin.book;
+              patched++;
+              try { if (window.__bookMap) window.__bookMap.set(pin.book.record_id, pin.book); } catch (e2) {}
+            }
+          }
+          if (patched > 0) LOG('v4q dbAll overlay: replaced ' + patched + ' pinned row(s)');
+        } catch (e) { WARN('v4q dbAll overlay error:', e && e.message); }
+        return books;
+      });
+    };
+    wrapped.__v4qPatched = true;
+    wrapped.__v4jPatched = true; // make installDbAllHook treat as already patched
+    window.dbAll = wrapped;
+    LOG('v4q dbAll overlay installed');
+  }
+
+  // Wrap pullFromCloud so after any pull completes, every live
+  // pin is re-asserted back into IDB + __bookMap. This closes the
+  // race where a pull that started pre-PATCH lands post-PATCH.
+  function __v4qWrapPullFromCloud() {
+    if (typeof window.pullFromCloud !== 'function') return;
+    if (window.pullFromCloud.__v4qWrapped) return;
+    var orig = window.pullFromCloud;
+    var wrapped = function __v4qPull() {
+      var p = orig.apply(this, arguments);
+      return Promise.resolve(p).then(function (res) {
+        try {
+          __v4qCleanExpiredPins();
+          if (__v4qPinnedResets.size > 0) {
+            var count = 0;
+            __v4qPinnedResets.forEach(function (v) {
+              if (v && v.book) { __v4qApplyPinned(v.book); count++; }
+            });
+            if (count > 0) LOG('v4q post-pull re-asserted ' + count + ' pinned reset(s)');
+          }
+        } catch (e) { WARN('v4q post-pull reassert error:', e && e.message); }
+        return res;
+      });
+    };
+    wrapped.__v4qWrapped = true;
+    window.pullFromCloud = wrapped;
+    LOG('v4q pullFromCloud wrap installed');
+  }
+
+  // --- (3) Reset inventory to "Not Checked" — v4q race-safe ----
   window.__v4pResetInventory = async function (id) {
     try {
       if (!confirm('هل تريد إرجاع هذا الكتاب إلى "غير مفحوص"؟')) return;
       var b = (typeof window.dbGet === 'function') ? await window.dbGet(id) : null;
-      if (!b) return;
-      b.inventory_status = 'Not Checked';
-      b.last_inventory_date = '';
-      b.inventoried_by = '';
-      b.match_method = '';
-      b.match_confidence = '';
-      b.review_status = 'Pending';
-      b.updated_at = new Date().toISOString();
-      await window.dbPut(b); // flows through v4m dbPut hook → __bookMap + cloud
+      if (!b) {
+        if (window.showToast) window.showToast('❌ الكتاب غير موجود');
+        return;
+      }
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (window.showToast) window.showToast('❌ لا يوجد اتصال — حاول لاحقاً');
+        return;
+      }
+      if (!b.cloud_id) {
+        if (window.showToast) window.showToast('❌ الكتاب لم يُرفع للخادم بعد');
+        return;
+      }
+      var cfg = getCfg();
+      if (!cfg.url || !cfg.key) {
+        if (window.showToast) window.showToast('❌ لا توجد إعدادات Supabase');
+        return;
+      }
+
+      // Direct PATCH with correct column types. Columns:
+      //   inventory_status:    text
+      //   last_inventory_date: timestamptz nullable
+      //   inventoried_by:      text nullable
+      //   match_confidence:    integer (canonical Not Checked value is 0)
+      //   match_method:        text
+      //   review_status:       text
+      // updated_at is omitted — the Supabase trigger sets it.
+      var patchBody = {
+        inventory_status: 'Not Checked',
+        last_inventory_date: null,
+        inventoried_by: null,
+        match_confidence: 0,
+        match_method: '',
+        review_status: 'Pending'
+      };
+      var endpoint = cfg.url + '/rest/v1/' + cfg.table +
+                     '?record_id=eq.' + encodeURIComponent(b.cloud_id);
+
+      var res;
+      try {
+        res = await origFetch(endpoint, {
+          method: 'PATCH',
+          headers: {
+            'apikey': cfg.key,
+            'Authorization': 'Bearer ' + cfg.key,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(patchBody)
+        });
+      } catch (e) {
+        WARN('v4q reset PATCH network error:', e && e.message);
+        if (window.showToast) window.showToast('❌ فشل الاتصال بالخادم');
+        return;
+      }
+      if (!res.ok) {
+        WARN('v4q reset PATCH status:', res.status);
+        if (window.showToast) window.showToast('❌ فشل تحديث الخادم (' + res.status + ')');
+        return;
+      }
+
+      var serverRows = null;
+      try { serverRows = await res.json(); } catch (e) {}
+      var serverBook = (Array.isArray(serverRows) && serverRows.length > 0) ? serverRows[0] : null;
+
+      // Build newBook: prefer server authoritative fields, keep
+      // local record_id and cloud_id intact.
+      var newBook = Object.assign({}, b);
+      if (serverBook) {
+        newBook = Object.assign({}, b, serverBook);
+      } else {
+        newBook.inventory_status    = 'Not Checked';
+        newBook.last_inventory_date = null;
+        newBook.inventoried_by      = null;
+        newBook.match_confidence    = 0;
+        newBook.match_method        = '';
+        newBook.review_status       = 'Pending';
+        newBook.updated_at          = new Date().toISOString();
+      }
+      newBook.record_id = b.record_id;
+      newBook.cloud_id  = b.cloud_id;
+
+      // Write IDB directly — bypasses dbPut → queueSync → fullSync
+      await __v4qRewriteIdb(newBook);
+      // Update __bookMap synchronously
+      try { if (window.__bookMap) window.__bookMap.set(newBook.record_id, newBook); } catch (e) {}
+
+      // Pin for 15s — protects against in-flight pulls and realtime bursts
+      __v4qPinReset(newBook, __V4Q_PIN_TTL_MS);
+
+      // Defensive re-assertions in case something slipped through
+      setTimeout(function () { __v4qApplyPinned(newBook); }, 1500);
+      setTimeout(function () { __v4qApplyPinned(newBook); }, 5000);
+      setTimeout(function () { __v4qApplyPinned(newBook); }, 10000);
+
       if (typeof window.showToast === 'function') window.showToast('✅ أُرجع إلى غير مفحوص');
-      if (typeof window.fullSync === 'function') setTimeout(window.fullSync, 500);
-      if (typeof window.showDet === 'function') window.showDet(id);
-    } catch (e) { WARN('v4p reset inv error:', e && e.message); }
+      if (typeof window.showDet === 'function') {
+        try { window.showDet(newBook.record_id); } catch (e) {}
+      }
+      try { scheduleUIRefresh('v4q-reset'); } catch (e) {}
+      LOG('v4q reset complete for record_id=' + newBook.record_id + ' cloud_id=' + newBook.cloud_id);
+    } catch (e) {
+      WARN('v4q reset inv error:', e && e.message);
+      if (typeof window.showToast === 'function') window.showToast('❌ خطأ غير متوقع');
+    }
   };
 
   // V4 FIX: re-assert our patched UI functions in case app.v5c.js's
@@ -1999,9 +2254,18 @@
     try { if (window.loadReports !== patchedLoadReports) window.loadReports = patchedLoadReports; } catch (e) {}
     try { if (window.showDet     !== patchedShowDet)     window.showDet     = patchedShowDet;     } catch (e) {}
     try { if (window.renderList  !== patchedRenderList)  window.renderList  = patchedRenderList;  } catch (e) {}
-    try { if (window.pullFromCloud !== paginatedPullFromCloud) window.pullFromCloud = paginatedPullFromCloud; } catch (e) {}
+    try {
+      // Only reset to raw paginated if NOT already wrapped by v4q
+      if (window.pullFromCloud !== paginatedPullFromCloud && !window.pullFromCloud.__v4qWrapped) {
+        window.pullFromCloud = paginatedPullFromCloud;
+      }
+    } catch (e) {}
     try { installDbAllHook(); } catch (e) {}
     try { installDbPutHook(); } catch (e) {}
+    // v4q: outermost overlays — installed AFTER v4j dbAll hook and
+    // AFTER paginatedPullFromCloud so they wrap the latest version.
+    try { __v4qInstallDbAllOverlay(); } catch (e) {}
+    try { __v4qWrapPullFromCloud(); } catch (e) {}
     // v4n: keep generateBarcode patched so rapid confirms stay unique.
     try { installBarcodeHook(); } catch (e) {}
     // v4p: home greeting + clickable stat items + filtered list + reset
