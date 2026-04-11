@@ -636,6 +636,32 @@
     return true;
   }
 
+  // v4l: hook dbPut so any local write (confirmBook, markNF, edit, etc.)
+  // instantly reflects in __bookMap. Without this, the user sees stale
+  // status on the detail view / list until the next full sync.
+  function installDbPutHook() {
+    if (typeof window.dbPut !== 'function') return false;
+    if (window.dbPut.__v4lPatched) return true;
+    var orig = window.dbPut;
+    var wrapped = function patchedDbPut(book) {
+      var p = orig.apply(this, arguments);
+      return Promise.resolve(p).then(function (res) {
+        try {
+          if (book && book.record_id != null && window.__bookMap) {
+            window.__bookMap.set(book.record_id, book);
+          }
+          if (book && book.record_id != null) invalidateCategoryCache(book.record_id);
+          // Fire a quick UI refresh so the list/home view picks it up
+          scheduleUIRefresh('local-write');
+        } catch (e) {}
+        return res;
+      });
+    };
+    wrapped.__v4lPatched = true;
+    window.dbPut = wrapped;
+    return true;
+  }
+
   /* -----------------------------------------------------------
      v4j: list cache — pagination no longer re-queries IDB
      __listCache[cid] stores the last books array passed to
@@ -1567,6 +1593,7 @@
     try { if (window.renderList  !== patchedRenderList)  window.renderList  = patchedRenderList;  } catch (e) {}
     try { if (window.pullFromCloud !== paginatedPullFromCloud) window.pullFromCloud = paginatedPullFromCloud; } catch (e) {}
     try { installDbAllHook(); } catch (e) {}
+    try { installDbPutHook(); } catch (e) {}
     try { setupDeweyEnricher(); } catch (e) {}
   }
   // Expose for manual debugging / external re-arming
