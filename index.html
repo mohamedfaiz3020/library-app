@@ -7,13 +7,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="جرد المكتبة">
 <meta name="theme-color" content="#070a0f">
-<!-- v4 20260410n: aggressive cache-busting so phones always pull the latest -->
+<!-- v4 20260410o: aggressive cache-busting so phones always pull the latest -->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="app-version" content="20260410n">
+<meta name="app-version" content="20260410o">
 <title>جرد المكتبة v5</title>
-<link rel="manifest" href="manifest.json?v=20260410n">
+<link rel="manifest" href="manifest.json?v=20260410o">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -1141,10 +1141,10 @@ select.form-input {
 }
 
 /* ============================================================
-   V4 DARK THEME OVERRIDE (20260410n)
+   V4 DARK THEME OVERRIDE (20260410o)
    Overrides existing CSS variables to dark-mode values without
    rewriting every rule. Also adds new components needed by
-   app.v5c.patch.js v20260410n (reports, virtual list, detail).
+   app.v5c.patch.js v20260410o (reports, virtual list, detail).
    ============================================================ */
 :root {
   --void:        #070a0f;
@@ -2245,8 +2245,8 @@ input::placeholder { color: var(--text-3) !important; }
 
 <script src="tesseract/tesseract.min.js"></script>
 <script src="lib/xlsx.full.min.js"></script>
-<script src="app.v5c.patch.js?v=20260410n"></script>
-<script src="app.v5c.js?v=20260410n"></script>
+<script src="app.v5c.patch.js?v=20260410o"></script>
+<script src="app.v5c.js?v=20260410o"></script>
 
 <script>
 // ============ GLOBAL STATE ============
@@ -3516,7 +3516,7 @@ function copyTeamCode() {
 // and reload once. This forces phones to pick up new deploys immediately.
 (function checkAppVersionAndMaybeReset() {
   try {
-    var CUR = '20260410n';
+    var CUR = '20260410o';
     var stored = localStorage.getItem('lib_app_version');
     if (stored !== CUR) {
       localStorage.setItem('lib_app_version', CUR);
@@ -3543,7 +3543,7 @@ function copyTeamCode() {
 })();
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=20260410n').then(function(reg){
+  navigator.serviceWorker.register('sw.js?v=20260410o').then(function(reg){
     // Poll for updates so phones pick up future deploys without manual refresh.
     try { reg.update(); } catch(e){}
     setInterval(function(){ try { reg.update(); } catch(e){} }, 60 * 1000);

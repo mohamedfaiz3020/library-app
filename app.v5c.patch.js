@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410n';
+  var PATCH_VERSION = '20260410o';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -680,6 +680,159 @@
     window.dbPut = wrapped;
     return true;
   }
+
+  /* ===========================================================
+     v4n: fast + unique generateBarcode
+     -----------------------------------------------------------
+     The original (app.v5c.js) generateBarcode:
+       1) awaits dbAll() — reads all 56,652 books from IDB
+          (expensive; contributes to the 13s cfDirect latency)
+       2) computes Math.max(...existing) + 1
+     Bug: under rapid confirms, two calls can begin before the
+     first dbPut commits, so both read the same max and both
+     return the SAME next barcode. Observed during v4m testing
+     (books 113648/113649 both got KFAA-LIB-000009;
+      113652/113653 both got KFAA-LIB-000012).
+
+     Fix strategy:
+       - Keep an in-memory monotonic counter per tab.
+       - Initialise from max(existing) in __bookMap (O(N) once,
+         synchronous — no IDB read).
+       - Rescan __bookMap on every call to pick up cross-tab
+         writes that landed via realtime / dbPut hooks.
+       - counter++ atomically (JS is single-threaded), so every
+         call within a single tab returns a unique integer.
+       - Format preserved exactly: KFAA-LIB-NNNNNN (6 digits,
+         zero-padded) so parseInt in the original code still
+         works if anything falls back to it.
+       - For width > 999,999 the format grows gracefully to
+         however many digits are needed.
+     =========================================================== */
+  var __barcodeCounter = 0;
+  var __barcodeCounterInit = false;
+  var __BARCODE_PREFIX = 'KFAA-LIB-';
+
+  function __scanMaxBarcode() {
+    var max = 0;
+    if (!window.__bookMap) return max;
+    try {
+      var it = window.__bookMap.values();
+      var e;
+      while ((e = it.next()).done === false) {
+        var b = e.value;
+        if (!b) continue;
+        var bc = b.internal_barcode;
+        if (!bc || typeof bc !== 'string') continue;
+        if (bc.indexOf(__BARCODE_PREFIX) !== 0) continue;
+        var n = parseInt(bc.slice(__BARCODE_PREFIX.length), 10);
+        if (!isNaN(n) && n > max) max = n;
+      }
+    } catch (err) {}
+    return max;
+  }
+
+  function __ensureBarcodeCounterInitialized() {
+    if (__barcodeCounterInit) return;
+    var scanned = __scanMaxBarcode();
+    if (scanned > __barcodeCounter) __barcodeCounter = scanned;
+    __barcodeCounterInit = true;
+  }
+
+  async function patchedGenerateBarcode() {
+    __ensureBarcodeCounterInitialized();
+    // Rescan to absorb cross-tab writes that landed in __bookMap
+    // since we last generated (e.g. realtime postgres_changes).
+    var scanned = __scanMaxBarcode();
+    if (scanned > __barcodeCounter) __barcodeCounter = scanned;
+    __barcodeCounter++;
+    var num = __barcodeCounter;
+    // Pad to at least 6 digits to preserve the existing format.
+    var s = String(num);
+    while (s.length < 6) s = '0' + s;
+    return __BARCODE_PREFIX + s;
+  }
+
+  function installBarcodeHook() {
+    try {
+      if (window.generateBarcode && window.generateBarcode.__v4nPatched) return true;
+      window.generateBarcode = patchedGenerateBarcode;
+      window.generateBarcode.__v4nPatched = true;
+      return true;
+    } catch (e) { return false; }
+  }
+  // Expose for manual debugging / tests.
+  window.__patchedGenerateBarcode = patchedGenerateBarcode;
+  window.__barcodeState = function () {
+    return {
+      counter: __barcodeCounter,
+      initialized: __barcodeCounterInit,
+      currentMax: __scanMaxBarcode()
+    };
+  };
+
+  /* ===========================================================
+     v4n: silence noisy ServiceWorker.update() polling errors.
+     ----------------------------------------------------------
+     index.html does setInterval(() => reg.update(), 60000) and
+     emits a "TypeError: Failed to update a ServiceWorker ...
+     Not found" + "InvalidStateError" to the console every minute
+     when the SW script URL has a stale ?v= query (CDN cache mis).
+     The SW itself stays activated and works fine — these are
+     pure noise. We monkey-patch ServiceWorkerRegistration's
+     .update() to swallow ONLY these specific errors so the
+     console stays useful for real problems.
+     =========================================================== */
+  (function patchServiceWorkerUpdate() {
+    try {
+      if (typeof ServiceWorkerRegistration === 'undefined') return;
+      var proto = ServiceWorkerRegistration.prototype;
+      if (!proto || !proto.update) return;
+      if (proto.update.__v4nPatched) return;
+      var origUpdate = proto.update;
+      proto.update = function () {
+        var p;
+        try { p = origUpdate.apply(this, arguments); }
+        catch (syncErr) {
+          var msg = String(syncErr && syncErr.message || syncErr || '');
+          if (/Failed to update a ServiceWorker|invalid state|Not found/i.test(msg)) {
+            return Promise.resolve();
+          }
+          throw syncErr;
+        }
+        if (p && typeof p.catch === 'function') {
+          return p.catch(function (err) {
+            var msg = String(err && err.message || err || '');
+            if (/Failed to update a ServiceWorker|invalid state|Not found/i.test(msg)) {
+              // swallow — known harmless polling noise
+              return undefined;
+            }
+            throw err;
+          });
+        }
+        return p;
+      };
+      proto.update.__v4nPatched = true;
+      LOG('ServiceWorkerRegistration.update() patched (noise filter)');
+    } catch (e) {}
+  })();
+
+  // Also catch the unhandledrejection variant in case the call site
+  // doesn't await reg.update() — index.html's setInterval doesn't.
+  (function installSwRejectionFilter() {
+    try {
+      if (window.__v4nSwRejFilter) return;
+      window.__v4nSwRejFilter = true;
+      window.addEventListener('unhandledrejection', function (ev) {
+        try {
+          var r = ev && ev.reason;
+          var msg = (r && (r.message || r.name)) || String(r || '');
+          if (/Failed to update a ServiceWorker|invalid state/i.test(String(msg))) {
+            ev.preventDefault();
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
+  })();
 
   /* -----------------------------------------------------------
      v4j: list cache — pagination no longer re-queries IDB
@@ -1682,6 +1835,8 @@
     try { if (window.pullFromCloud !== paginatedPullFromCloud) window.pullFromCloud = paginatedPullFromCloud; } catch (e) {}
     try { installDbAllHook(); } catch (e) {}
     try { installDbPutHook(); } catch (e) {}
+    // v4n: keep generateBarcode patched so rapid confirms stay unique.
+    try { installBarcodeHook(); } catch (e) {}
     // v4m: rebuild the cloud_id→local_id index whenever we reassert.
     // This keeps sync O(1) even if __bookMap was rebuilt by a fresh pull.
     try { rebuildCloudIdIndex(); } catch (e) {}
