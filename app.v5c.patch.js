@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410j';
+  var PATCH_VERSION = '20260410k';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -1275,11 +1275,44 @@
     }
     return parseInt(m[1], 10);
   }
+  // v4k: lookup book from match-card by title (match-cards don't carry record_id)
+  var __titleIndex = null;
+  function buildTitleIndex() {
+    if (!window.__bookMap) return null;
+    __titleIndex = new Map();
+    var it = window.__bookMap.values();
+    var n;
+    while (!(n = it.next()).done) {
+      var b = n.value;
+      if (b && b.title) {
+        var key = String(b.title).replace(/\s+/g, ' ').trim();
+        if (!__titleIndex.has(key)) __titleIndex.set(key, b);
+      }
+    }
+    return __titleIndex;
+  }
+  function findBookForMatchCard(card) {
+    // Try to match by title extracted from the card
+    var titleEl = card.querySelector('.match-title');
+    if (!titleEl) return null;
+    var title = titleEl.textContent.replace(/\s+/g, ' ').trim();
+    if (!title) return null;
+    if (!__titleIndex) buildTitleIndex();
+    if (!__titleIndex) return null;
+    return __titleIndex.get(title) || null;
+  }
   function enrichCardWithDewey(card) {
     if (!card || card.__v4jDewey) return;
+    var book = null;
+    // Path 1: has showDet(id) onclick
     var id = extractIdFromCard(card);
-    if (id == null) return;
-    var book = getCachedBook(id);
+    if (id != null) {
+      book = getCachedBook(id);
+    }
+    // Path 2: match-card — lookup by title
+    if (!book && card.classList && card.classList.contains('match-card')) {
+      book = findBookForMatchCard(card);
+    }
     if (!book) return;
     var dewey = book.doctype || book.full_call_number || book.dewey_number || book.diwi || '';
     if (!dewey) { card.__v4jDewey = true; return; }
@@ -1287,9 +1320,9 @@
     if (card.querySelector('.v4j-dewey-row')) { card.__v4jDewey = true; return; }
     var row = document.createElement('div');
     row.className = 'v4j-dewey-row';
-    row.style.cssText = 'margin-top:6px;padding:5px 10px;background:rgba(230,168,90,0.10);border:1px solid rgba(230,168,90,0.25);border-radius:8px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;font-weight:700;color:var(--gold,#e6a85a);direction:rtl;display:inline-flex;align-items:center;gap:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    row.style.cssText = 'margin-top:8px;padding:6px 12px;background:rgba(230,168,90,0.12);border:1.5px solid rgba(230,168,90,0.35);border-radius:8px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;font-weight:700;color:var(--gold,#e6a85a);direction:rtl;display:flex;align-items:center;gap:8px;flex-wrap:wrap';
     var lbl = document.createElement('span');
-    lbl.style.cssText = 'font-size:10px;color:var(--text-2,#a8aab1);font-weight:600';
+    lbl.style.cssText = 'font-size:11px;color:var(--text-2,#a8aab1);font-weight:700;letter-spacing:0.3px';
     lbl.textContent = 'رقم الديوي';
     var val = document.createElement('span');
     val.className = 'number';
@@ -1302,11 +1335,14 @@
   }
   function enrichContainer(container) {
     if (!container) return;
-    // Treat direct children clickable cards + nested [onclick*=showDet]
-    var cards = container.querySelectorAll('[onclick*="showDet("]');
-    for (var i = 0; i < cards.length; i++) {
-      enrichCardWithDewey(cards[i]);
-    }
+    // Cards with showDet onclick
+    var a = container.querySelectorAll('[onclick*="showDet("]');
+    for (var i = 0; i < a.length; i++) enrichCardWithDewey(a[i]);
+    // Scanner match-cards (no record_id, lookup by title)
+    var b = container.querySelectorAll('.match-card');
+    for (var j = 0; j < b.length; j++) enrichCardWithDewey(b[j]);
+    // Also handle the container itself if it IS a match-card
+    if (container.classList && container.classList.contains('match-card')) enrichCardWithDewey(container);
   }
   var deweyEnricherInstalled = false;
   function setupDeweyEnricher() {
