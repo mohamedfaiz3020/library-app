@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410o';
+  var PATCH_VERSION = '20260410p';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -1244,6 +1244,11 @@
       html += '  <button class="btn btn-teal" onclick="cfDirect(' + b.record_id + ')">✅ تأكيد الجرد</button>';
     }
     html += '  <button class="btn btn-coral" onclick="markNF(' + b.record_id + ')">❌ غير موجود</button>';
+    // v4p: allow rolling a book back to "not checked" if it was inventoried by mistake.
+    // Only visible when the book already has a final status (Found or Not Found).
+    if (b.inventory_status === 'Found' || b.inventory_status === 'Not Found' || b.inventory_status === 'Lost') {
+      html += '  <button class="btn btn-ghost" onclick="__v4pResetInventory(' + b.record_id + ')">↩ إعادة إلى غير مفحوص</button>';
+    }
     if (b.internal_barcode) {
       html += '  <button class="btn btn-gold" onclick="showBC(\'' + escHtml(String(b.internal_barcode)) + '\')">📊 الباركود</button>';
     }
@@ -1825,6 +1830,168 @@
   }
   window.__setupDeweyEnricher = setupDeweyEnricher;
 
+  /* ===========================================================
+     v4p: personalized home greeting + clickable Found/NotFound
+          stat items + reset-inventory from detail page
+     -----------------------------------------------------------
+     User request (2026-04-12, Mohamed):
+       "كل شي تمام بس اضف لي عند مرحبا اسم الشخص ... وايضاً
+        خلني اقدر اشوف الكتب الي جردتها خانه الموجود اقدر ادخل
+        عليها وكذلك المفقود عشان لو بغيت ارجع كتاب ما طلع هو
+        الي جردته. اما الباقي اجمالي و غير مفحوص مب لازم."
+
+     Deliberately leaves the total + not-checked stat items
+     completely untouched. No CSS changes. No new pages.
+     =========================================================== */
+
+  // --- (1) Personalized home greeting ----------------------
+  function __v4pGetDisplayName() {
+    try {
+      var u = window.currentUser;
+      if (!u || typeof u.name !== 'string') return null;
+      var n = u.name.trim();
+      return n || null;
+    } catch (e) { return null; }
+  }
+
+  function __v4pApplyHomeGreeting() {
+    try {
+      var title = document.querySelector('#pgHome .hero-title');
+      if (!title) return false;
+      var name = __v4pGetDisplayName();
+      var greet = name ? ('مرحباً بك ' + name + ' 👋') : 'مرحباً بك 👋';
+      if (title.textContent !== greet) title.textContent = greet;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // --- (2) Clickable Found / NotFound stat items -----------
+  // Exported so the detail → reset flow can check it too.
+  window.__v4pListFilter = null; // 'Found' | 'Not Found' | null
+
+  function __v4pOpenFiltered(filter) {
+    window.__v4pListFilter = filter;
+    try { if (typeof window.nav === 'function') window.nav('allbooks'); } catch (e) {}
+    try {
+      var t = document.getElementById('hdrTitle');
+      if (t) t.textContent = (filter === 'Found' ? 'الكتب المجرودة' : 'الكتب المفقودة');
+    } catch (e) {}
+  }
+
+  function __v4pInstallStatItemClicks() {
+    try {
+      var items = document.querySelectorAll('#pgHome .stat-item');
+      if (!items || !items.length) return;
+      items.forEach(function (el) {
+        var num = el.querySelector('.stat-number');
+        if (!num) return;
+        var filter = null;
+        if (num.id === 'statFound')    filter = 'Found';
+        else if (num.id === 'statNotFound') filter = 'Not Found';
+        // statTotal + statNotChecked intentionally skipped.
+        if (!filter) return;
+        if (el.__v4pClickable) return;
+        el.__v4pClickable = true;
+        el.style.cursor = 'pointer';
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        var handler = function (e) {
+          if (e) { try { e.preventDefault(); e.stopPropagation(); } catch (err) {} }
+          __v4pOpenFiltered(filter);
+        };
+        el.addEventListener('click', handler);
+        el.addEventListener('keydown', function (e) {
+          if (e && (e.key === 'Enter' || e.key === ' ')) handler(e);
+        });
+      });
+    } catch (e) {}
+  }
+
+  // Wrap loadHome so greeting + click-handlers apply after every refresh
+  var __v4pLoadHomePatched = false;
+  function __v4pInstallLoadHomeHook() {
+    if (__v4pLoadHomePatched) return;
+    if (typeof window.loadHome !== 'function') return;
+    var orig = window.loadHome;
+    window.loadHome = function () {
+      var r;
+      try { r = orig.apply(this, arguments); }
+      catch (e) { throw e; }
+      try { __v4pApplyHomeGreeting(); __v4pInstallStatItemClicks(); } catch (e) {}
+      try {
+        if (r && typeof r.then === 'function') {
+          r.then(function () {
+            try { __v4pApplyHomeGreeting(); __v4pInstallStatItemClicks(); } catch (e) {}
+          });
+        }
+      } catch (e) {}
+      return r;
+    };
+    __v4pLoadHomePatched = true;
+    LOG('v4p loadHome hook installed');
+  }
+
+  // Wrap loadAllBooks so a pending filter produces a filtered list
+  var __v4pLoadAllBooksPatched = false;
+  function __v4pInstallLoadAllBooksHook() {
+    if (__v4pLoadAllBooksPatched) return;
+    if (typeof window.loadAllBooks !== 'function') return;
+    var orig = window.loadAllBooks;
+    window.loadAllBooks = async function () {
+      var filter = window.__v4pListFilter;
+      if (!filter) return orig.apply(this, arguments);
+      try {
+        var books = (typeof window.dbAll === 'function') ? await window.dbAll() : [];
+        var filtered = books.filter(function (b) { return b && b.inventory_status === filter; });
+        if (typeof window.renderList === 'function') {
+          window.renderList(filtered, 'allList');
+        }
+        // nav() already called updateHeader() before we ran; re-apply.
+        var t = document.getElementById('hdrTitle');
+        if (t) t.textContent = (filter === 'Found' ? 'الكتب المجرودة' : 'الكتب المفقودة');
+      } catch (e) { WARN('v4p filtered list error:', e && e.message); }
+    };
+    __v4pLoadAllBooksPatched = true;
+    LOG('v4p loadAllBooks hook installed');
+  }
+
+  // Wrap nav so the filter clears when leaving the filtered list
+  // (but survives an allbooks → detail trip so the user can drill in).
+  var __v4pNavPatched = false;
+  function __v4pInstallNavHook() {
+    if (__v4pNavPatched) return;
+    if (typeof window.nav !== 'function') return;
+    var orig = window.nav;
+    window.nav = function (page) {
+      if (page !== 'allbooks' && page !== 'detail') {
+        window.__v4pListFilter = null;
+      }
+      return orig.apply(this, arguments);
+    };
+    __v4pNavPatched = true;
+    LOG('v4p nav hook installed');
+  }
+
+  // --- (3) Reset inventory to "Not Checked" ---------------
+  window.__v4pResetInventory = async function (id) {
+    try {
+      if (!confirm('هل تريد إرجاع هذا الكتاب إلى "غير مفحوص"؟')) return;
+      var b = (typeof window.dbGet === 'function') ? await window.dbGet(id) : null;
+      if (!b) return;
+      b.inventory_status = 'Not Checked';
+      b.last_inventory_date = '';
+      b.inventoried_by = '';
+      b.match_method = '';
+      b.match_confidence = '';
+      b.review_status = 'Pending';
+      b.updated_at = new Date().toISOString();
+      await window.dbPut(b); // flows through v4m dbPut hook → __bookMap + cloud
+      if (typeof window.showToast === 'function') window.showToast('✅ أُرجع إلى غير مفحوص');
+      if (typeof window.fullSync === 'function') setTimeout(window.fullSync, 500);
+      if (typeof window.showDet === 'function') window.showDet(id);
+    } catch (e) { WARN('v4p reset inv error:', e && e.message); }
+  };
+
   // V4 FIX: re-assert our patched UI functions in case app.v5c.js's
   // hoisted `function loadReports(){}` / `function showDet(){}` / `function renderList(){}`
   // overwrote our earlier window assignments. Safe to call repeatedly.
@@ -1837,6 +2004,11 @@
     try { installDbPutHook(); } catch (e) {}
     // v4n: keep generateBarcode patched so rapid confirms stay unique.
     try { installBarcodeHook(); } catch (e) {}
+    // v4p: home greeting + clickable stat items + filtered list + reset
+    try { __v4pInstallLoadHomeHook(); } catch (e) {}
+    try { __v4pInstallLoadAllBooksHook(); } catch (e) {}
+    try { __v4pInstallNavHook(); } catch (e) {}
+    try { __v4pApplyHomeGreeting(); __v4pInstallStatItemClicks(); } catch (e) {}
     // v4m: rebuild the cloud_id→local_id index whenever we reassert.
     // This keeps sync O(1) even if __bookMap was rebuilt by a fresh pull.
     try { rebuildCloudIdIndex(); } catch (e) {}
