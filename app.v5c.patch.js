@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410m';
+  var PATCH_VERSION = '20260410n';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -627,6 +627,18 @@
       return Promise.resolve(p).then(function (books) {
         if (Array.isArray(books) && books.length > 0) {
           rebuildBookMap(books);
+          // v4m: also rebuild the cloud_id index so realtime stays O(1)
+          try {
+            if (typeof __cloudIdToLocalId !== 'undefined') {
+              __cloudIdToLocalId.clear();
+              for (var i = 0; i < books.length; i++) {
+                var b = books[i];
+                if (b && b.cloud_id != null && b.record_id != null) {
+                  __cloudIdToLocalId.set(b.cloud_id, b.record_id);
+                }
+              }
+            }
+          } catch (e2) {}
         }
         return books;
       });
@@ -650,6 +662,13 @@
           if (book && book.record_id != null && window.__bookMap) {
             window.__bookMap.set(book.record_id, book);
           }
+          // v4m: keep cloud_id index in sync on local writes
+          try {
+            if (book && book.cloud_id != null && book.record_id != null &&
+                typeof __cloudIdToLocalId !== 'undefined') {
+              __cloudIdToLocalId.set(book.cloud_id, book.record_id);
+            }
+          } catch (e2) {}
           if (book && book.record_id != null) invalidateCategoryCache(book.record_id);
           // Fire a quick UI refresh so the list/home view picks it up
           scheduleUIRefresh('local-write');
@@ -1224,81 +1243,142 @@
   }
 
   /* ===========================================================
-     v4l — Realtime FAST PATH + delta pull
+     v4m — Realtime FAST PATH (O(1) cloud_id index, sync bookMap)
      =========================================================== */
-  // Apply a single realtime record inline: no fetch, just IDB put +
-  // __bookMap update + UI refresh. This is how cross-device sync
-  // drops from 40s to sub-second.
+  // Apply a single realtime record inline: O(1) lookup via cloud_id
+  // index, synchronous __bookMap update, async IDB put. This drops
+  // cross-device sync from 40s to <500ms.
   var __lastDeltaIso = null;
+  var __cloudIdToLocalId = new Map();
   function nowIso() { return new Date().toISOString(); }
   function isoAgo(ms) { return new Date(Date.now() - ms).toISOString(); }
 
+  // Build or refresh the cloud_id→local_record_id index from __bookMap
+  function rebuildCloudIdIndex() {
+    try {
+      __cloudIdToLocalId.clear();
+      if (!window.__bookMap) return 0;
+      var n = 0;
+      window.__bookMap.forEach(function (v, k) {
+        if (v && v.cloud_id != null) {
+          __cloudIdToLocalId.set(v.cloud_id, k);
+          n++;
+        }
+      });
+      LOG('v4m cloudId index built: ' + n + ' entries');
+      return n;
+    } catch (e) { return 0; }
+  }
+  window.__rebuildCloudIdIndex = rebuildCloudIdIndex;
+
   function applyRealtimeRecord(record, type) {
-    if (!record) return Promise.resolve(false);
+    if (!record || record.record_id == null) return Promise.resolve(false);
     // Track most recent updated_at seen so pullDelta can resume
     try {
       if (record.updated_at && (!__lastDeltaIso || record.updated_at > __lastDeltaIso)) {
         __lastDeltaIso = record.updated_at;
       }
     } catch (e) {}
+
+    // The incoming record is the Supabase row. record.record_id is the
+    // CLOUD id (Supabase PK), NOT our local IDB key.
+    var cloudId = record.record_id;
+    var localId = __cloudIdToLocalId.get(cloudId);
+
+    // ---------- DELETE ----------
+    if (type === 'DELETE') {
+      if (localId == null) return Promise.resolve(false);
+      __cloudIdToLocalId.delete(cloudId);
+      try { if (window.__bookMap) window.__bookMap.delete(localId); } catch (e) {}
+      try { invalidateCategoryCache(localId); } catch (e) {}
+      return openIDB().then(function (db) {
+        return new Promise(function (resolve) {
+          var tx = db.transaction('books', 'readwrite');
+          tx.objectStore('books').delete(localId);
+          tx.oncomplete = function () { db.close(); resolve(true); };
+          tx.onerror    = function () { try { db.close(); } catch (e) {} resolve(false); };
+          tx.onabort    = function () { try { db.close(); } catch (e) {} resolve(false); };
+        });
+      });
+    }
+
+    // ---------- UPDATE existing (O(1) via index) ----------
+    if (localId != null) {
+      var upd = Object.assign({}, record);
+      upd.record_id = localId;
+      upd.cloud_id  = cloudId;
+      // Sync __bookMap update — makes the new state visible to UI/polls
+      // immediately without waiting for the IDB transaction.
+      try {
+        if (window.__bookMap) window.__bookMap.set(localId, upd);
+      } catch (e) {}
+      try { invalidateCategoryCache(localId); } catch (e) {}
+      // Async persist to IDB
+      return openIDB().then(function (db) {
+        return new Promise(function (resolve) {
+          var tx = db.transaction('books', 'readwrite');
+          tx.objectStore('books').put(upd);
+          tx.oncomplete = function () { db.close(); resolve(true); };
+          tx.onerror    = function () { try { db.close(); } catch (e) {} resolve(false); };
+          tx.onabort    = function () { try { db.close(); } catch (e) {} resolve(false); };
+        });
+      });
+    }
+
+    // ---------- UNKNOWN cloud_id: try title+author match first ----------
+    // This catches books that were added locally without a cloud_id yet.
+    var tk = ((record.title || '').trim() + '|||' + (record.author || '').trim());
+    if (tk !== '|||' && window.__bookMap) {
+      var matchLocalId = null;
+      for (var ent of window.__bookMap.entries()) {
+        var lb = ent[1];
+        if (lb && lb.cloud_id == null) {
+          var lk = ((lb.title || '').trim() + '|||' + (lb.author || '').trim());
+          if (lk === tk) { matchLocalId = ent[0]; break; }
+        }
+      }
+      if (matchLocalId != null) {
+        var upd2 = Object.assign({}, record);
+        upd2.record_id = matchLocalId;
+        upd2.cloud_id  = cloudId;
+        __cloudIdToLocalId.set(cloudId, matchLocalId);
+        try {
+          if (window.__bookMap) window.__bookMap.set(matchLocalId, upd2);
+        } catch (e) {}
+        try { invalidateCategoryCache(matchLocalId); } catch (e) {}
+        return openIDB().then(function (db) {
+          return new Promise(function (resolve) {
+            var tx = db.transaction('books', 'readwrite');
+            tx.objectStore('books').put(upd2);
+            tx.oncomplete = function () { db.close(); resolve(true); };
+            tx.onerror    = function () { try { db.close(); } catch (e) {} resolve(false); };
+          });
+        });
+      }
+    }
+
+    // ---------- INSERT genuinely new ----------
     return openIDB().then(function (db) {
-      if (!db.objectStoreNames.contains('books')) { db.close(); return false; }
       return new Promise(function (resolve) {
         var tx = db.transaction('books', 'readwrite');
         var store = tx.objectStore('books');
-        var getAllReq = store.getAll();
-        getAllReq.onsuccess = function () {
+        var nb = Object.assign({}, record);
+        nb.cloud_id = cloudId;
+        delete nb.record_id;
+        var addReq = store.add(nb);
+        addReq.onsuccess = function () {
+          var newId = addReq.result;
+          __cloudIdToLocalId.set(cloudId, newId);
           try {
-            var local = getAllReq.result || [];
-            var remoteId = record.record_id;
-            var match = null;
-            for (var i = 0; i < local.length; i++) {
-              if (local[i].cloud_id === remoteId) { match = local[i]; break; }
+            if (window.__bookMap) {
+              var saved = Object.assign({}, nb);
+              saved.record_id = newId;
+              window.__bookMap.set(newId, saved);
             }
-            if (!match) {
-              var tk = (record.title || '').trim() + '|||' + (record.author || '').trim();
-              if (tk !== '|||') {
-                for (var j = 0; j < local.length; j++) {
-                  var lk = (local[j].title || '').trim() + '|||' + (local[j].author || '').trim();
-                  if (lk === tk) { match = local[j]; break; }
-                }
-              }
-            }
-            if (type === 'DELETE') {
-              if (match) store.delete(match.record_id);
-            } else if (match) {
-              var upd = Object.assign({}, record);
-              upd.record_id = match.record_id;
-              upd.cloud_id = remoteId;
-              store.put(upd);
-              // Update __bookMap in place
-              try {
-                if (window.__bookMap && match.record_id != null) {
-                  window.__bookMap.set(match.record_id, upd);
-                }
-              } catch (e) {}
-              try { invalidateCategoryCache(match.record_id); } catch (e) {}
-            } else {
-              // INSERT new
-              var nb = Object.assign({}, record);
-              nb.cloud_id = remoteId;
-              delete nb.record_id;
-              var addReq = store.add(nb);
-              addReq.onsuccess = function () {
-                try {
-                  if (window.__bookMap) {
-                    var saved = Object.assign({}, nb);
-                    saved.record_id = addReq.result;
-                    window.__bookMap.set(addReq.result, saved);
-                  }
-                } catch (e) {}
-              };
-            }
-          } catch (e) { WARN('applyRealtimeRecord inner:', e && e.message); }
+          } catch (e) {}
         };
         tx.oncomplete = function () { db.close(); resolve(true); };
         tx.onerror    = function () { try { db.close(); } catch (e) {} resolve(false); };
-        tx.onabort    = function () { try { db.close(); } catch (e) {} resolve(false); };
       });
     });
   }
@@ -1371,48 +1451,56 @@
   function installRealtimeHook() {
     var ws = window.realtimeWs;
     if (!ws) return;
-    if (realtimeHookedWs === ws) return;
     if (ws.readyState > 1) return;
+    // Detect if hook is already installed on this exact WebSocket
+    try {
+      if (ws.onmessage && ws.onmessage.__v4mHook) return;
+    } catch (e) {}
     try {
       var origOnMessage = ws.onmessage;
-      ws.onmessage = function (evt) {
-        // Let the original still handle any UI status bits, but its
-        // pullFromCloud path is already redirected to our paginated pull
-        // (which we DON'T want firing on every event).
-        try { if (origOnMessage) origOnMessage.call(this, evt); } catch (e) {}
+      var hooked = function (evt) {
+        var handledAsChange = false;
         try {
-          var msg; try { msg = JSON.parse(evt.data); } catch (e) { return; }
-          if (!msg) return;
-          var isChange = msg.event === 'postgres_changes' ||
-            msg.event === 'INSERT' || msg.event === 'UPDATE' || msg.event === 'DELETE' ||
-            (msg.payload && msg.payload.data &&
-             (msg.payload.data.type === 'INSERT' || msg.payload.data.type === 'UPDATE' || msg.payload.data.type === 'DELETE'));
-          if (!isChange) return;
-
-          // v4l FAST PATH: apply the record INLINE from the event payload.
-          // No network fetch — sub-second end-to-end.
-          var info = extractRecordFromMsg(msg);
-          if (info.record && info.record.record_id != null) {
-            applyRealtimeRecord(info.record, info.type || 'UPDATE').then(function () {
-              scheduleUIRefresh('realtime-inline');
-            }).catch(function () {});
+          var msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
+          if (msg) {
+            var isChange = msg.event === 'postgres_changes' ||
+              msg.event === 'INSERT' || msg.event === 'UPDATE' || msg.event === 'DELETE' ||
+              (msg.payload && msg.payload.data &&
+               (msg.payload.data.type === 'INSERT' || msg.payload.data.type === 'UPDATE' || msg.payload.data.type === 'DELETE'));
+            if (isChange) {
+              handledAsChange = true;
+              // v4m FAST PATH: apply INLINE from event payload. NO network fetch.
+              var info = extractRecordFromMsg(msg);
+              if (info.record && info.record.record_id != null) {
+                applyRealtimeRecord(info.record, info.type || 'UPDATE').then(function () {
+                  scheduleUIRefresh('realtime-inline');
+                }).catch(function () {});
+              }
+              // Safety-net: very short debounced delta pull in case an
+              // event was dropped. Short + coalesced so it's cheap.
+              realtimeEventsSinceLastPull++;
+              clearTimeout(realtimeBatchTimer);
+              realtimeBatchTimer = setTimeout(function () {
+                var n = realtimeEventsSinceLastPull;
+                realtimeEventsSinceLastPull = 0;
+                LOG('realtime batch: ' + n + ' events → delta pull');
+                pullDeltaSince(__lastDeltaIso || isoAgo(30000)).catch(function () {});
+              }, 500);
+            }
           }
-
-          // ALSO kick a short-window delta pull as safety net, in case we
-          // missed an earlier event or the inline apply didn't find the row.
-          // Batch to coalesce bursts, but short enough to feel instant.
-          realtimeEventsSinceLastPull++;
-          clearTimeout(realtimeBatchTimer);
-          realtimeBatchTimer = setTimeout(function () {
-            var n = realtimeEventsSinceLastPull;
-            realtimeEventsSinceLastPull = 0;
-            LOG('realtime batch: ' + n + ' events → delta pull');
-            pullDeltaSince(__lastDeltaIso || isoAgo(30000)).catch(function () {});
-          }, 300);
         } catch (e) {}
+        // Only pass non-change messages (heartbeats, presence, join acks)
+        // to the original handler. This avoids origOnMessage triggering
+        // paginatedPullFromCloud, which would overwrite __bookMap with a
+        // full paginated fetch on every single row change.
+        if (!handledAsChange) {
+          try { if (origOnMessage) origOnMessage.call(this, evt); } catch (e) {}
+        }
       };
+      hooked.__v4mHook = true;
+      ws.onmessage = hooked;
       realtimeHookedWs = ws;
-      LOG('v4l realtime hook installed (inline + delta)');
+      LOG('v4m realtime hook installed (inline + O(1) index)');
     } catch (e) {}
   }
 
@@ -1594,6 +1682,9 @@
     try { if (window.pullFromCloud !== paginatedPullFromCloud) window.pullFromCloud = paginatedPullFromCloud; } catch (e) {}
     try { installDbAllHook(); } catch (e) {}
     try { installDbPutHook(); } catch (e) {}
+    // v4m: rebuild the cloud_id→local_id index whenever we reassert.
+    // This keeps sync O(1) even if __bookMap was rebuilt by a fresh pull.
+    try { rebuildCloudIdIndex(); } catch (e) {}
     try { setupDeweyEnricher(); } catch (e) {}
   }
   // Expose for manual debugging / external re-arming
