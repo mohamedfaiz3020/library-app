@@ -52,7 +52,7 @@
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '20260410qr2';
+  var PATCH_VERSION = '20260410r';
   // Keep the reset marker from v4h — we do NOT want to force a local IDB wipe
   // on this hotfix, that would cause users to re-pull 56K for nothing.
   var RESET_MARKER  = '20260410h-reset-v1';
@@ -2154,27 +2154,32 @@
     LOG('v4q pullFromCloud wrap installed');
   }
 
-  // --- (3) Reset inventory to "Not Checked" — v4q race-safe ----
+  // --- (3) Reset inventory to "Not Checked" — v4r race-safe ----
+  // v4r: re-entrancy guard prevents double-fire on mobile touch devices
+  // (some browsers dispatch click twice on a single tap).
+  var __v4rResetInProgress = false;
   window.__v4pResetInventory = async function (id) {
+    if (__v4rResetInProgress) { LOG('v4r reset: blocked re-entrant call for id=' + id); return; }
+    __v4rResetInProgress = true;
     try {
-      if (!confirm('هل تريد إرجاع هذا الكتاب إلى "غير مفحوص"؟')) return;
+      if (!confirm('هل تريد إرجاع هذا الكتاب إلى "غير مفحوص"؟')) { __v4rResetInProgress = false; return; }
       var b = (typeof window.dbGet === 'function') ? await window.dbGet(id) : null;
       if (!b) {
         if (window.showToast) window.showToast('❌ الكتاب غير موجود');
-        return;
+        __v4rResetInProgress = false; return;
       }
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         if (window.showToast) window.showToast('❌ لا يوجد اتصال — حاول لاحقاً');
-        return;
+        __v4rResetInProgress = false; return;
       }
       if (!b.cloud_id) {
         if (window.showToast) window.showToast('❌ الكتاب لم يُرفع للخادم بعد');
-        return;
+        __v4rResetInProgress = false; return;
       }
       var cfg = getCfg();
       if (!cfg.url || !cfg.key) {
         if (window.showToast) window.showToast('❌ لا توجد إعدادات Supabase');
-        return;
+        __v4rResetInProgress = false; return;
       }
 
       // Direct PATCH with correct column types. Columns:
@@ -2211,12 +2216,12 @@
       } catch (e) {
         WARN('v4q reset PATCH network error:', e && e.message);
         if (window.showToast) window.showToast('❌ فشل الاتصال بالخادم');
-        return;
+        __v4rResetInProgress = false; return;
       }
       if (!res.ok) {
         WARN('v4q reset PATCH status:', res.status);
         if (window.showToast) window.showToast('❌ فشل تحديث الخادم (' + res.status + ')');
-        return;
+        __v4rResetInProgress = false; return;
       }
 
       var serverRows = null;
@@ -2245,13 +2250,41 @@
       // Update __bookMap synchronously
       try { if (window.__bookMap) window.__bookMap.set(newBook.record_id, newBook); } catch (e) {}
 
-      // Pin for 15s — protects against in-flight pulls and realtime bursts
+      // Pin for 60s — protects against in-flight pulls and realtime bursts
       __v4qPinReset(newBook, __V4Q_PIN_TTL_MS);
 
-      // Defensive re-assertions across the full 60s pin lifetime.
-      // These are idempotent and catch any stale read (dbAll, pull,
-      // realtime) that resolves during the window.
-      [1500, 5000, 10000, 20000, 35000, 55000].forEach(function (ms) {
+      // v4r: nuke any pending sync_queue entry for this book so a stale
+      // fullSync (triggered by a prior cfDirect/markNF) cannot push old
+      // Found/Not Found state to Supabase and overwrite our direct PATCH.
+      try {
+        openIDB().then(function (db) {
+          try {
+            if (!db.objectStoreNames.contains('sync_queue')) { db.close(); return; }
+            var tx = db.transaction('sync_queue', 'readwrite');
+            var st = tx.objectStore('sync_queue');
+            var cur = st.openCursor();
+            cur.onsuccess = function () {
+              var c = cur.result;
+              if (!c) return;
+              try {
+                var r = c.value;
+                if (r && (r.record_id === newBook.record_id || r.record_id === newBook.cloud_id ||
+                    r.cloud_id === newBook.cloud_id)) {
+                  c.delete();
+                  LOG('v4r: nuked sync_queue entry for reset book');
+                }
+              } catch (e2) {}
+              c.continue();
+            };
+            tx.oncomplete = function () { db.close(); };
+            tx.onerror    = function () { try { db.close(); } catch (e2) {} };
+          } catch (e2) { try { db.close(); } catch (e3) {} }
+        }).catch(function () {});
+      } catch (e) {}
+
+      // v4r: reduced defensive re-assertions — only 3 checkpoints within
+      // the pin lifetime. Fewer timers = less IDB churn.
+      [2000, 8000, 15000].forEach(function (ms) {
         setTimeout(function () { __v4qApplyPinned(newBook); }, ms);
       });
 
@@ -2260,12 +2293,193 @@
         try { window.showDet(newBook.record_id); } catch (e) {}
       }
       try { scheduleUIRefresh('v4q-reset'); } catch (e) {}
-      LOG('v4q reset complete for record_id=' + newBook.record_id + ' cloud_id=' + newBook.cloud_id);
+      LOG('v4r reset complete for record_id=' + newBook.record_id + ' cloud_id=' + newBook.cloud_id);
     } catch (e) {
-      WARN('v4q reset inv error:', e && e.message);
+      WARN('v4r reset inv error:', e && e.message);
       if (typeof window.showToast === 'function') window.showToast('❌ خطأ غير متوقع');
+    } finally {
+      // v4r: always clear re-entrancy guard, even on error
+      __v4rResetInProgress = false;
     }
   };
+
+  /* ===========================================================
+     v4r: Debounced search — fixes crash on home/search page
+     -----------------------------------------------------------
+     Bug: doSearch() in app.v5c.js calls dbAll() on every keyup,
+     reading 56K books from IDB, rebuilding __bookMap, and then
+     rendering ALL matches into innerHTML. With 56K books, this
+     freezes the browser on the second keystroke.
+
+     Fix:
+       1. Override doSearch() with a debounced version (300ms).
+       2. Use __bookMap (already in memory) instead of dbAll().
+       3. Limit rendered results to 100 to prevent DOM explosion.
+       4. Prevent <form> submission / Enter key → page reload.
+       5. Minimum 2 characters before searching.
+     =========================================================== */
+  var __v4rSearchTimer = null;
+  var __v4rSearchPatched = false;
+
+  function __v4rInstallSearchFix() {
+    if (__v4rSearchPatched) return;
+    // Patch doSearch
+    if (typeof window.doSearch !== 'function') return;
+    var MAX_RESULTS = 100;
+    var DEBOUNCE_MS = 300;
+
+    // Helper: escape HTML to prevent XSS
+    function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // Helper: get status badge class (mirrors app.v5c.js)
+    function stBadge(s) {
+      if (s === 'Found')      return 'badge-success';
+      if (s === 'Not Found')  return 'badge-error';
+      if (s === 'Not Checked') return 'badge-warning';
+      return 'badge-default';
+    }
+    function stAr(s) {
+      if (s === 'Found')       return 'موجود';
+      if (s === 'Not Found')   return 'مفقود';
+      if (s === 'Not Checked') return 'غير مفحوص';
+      return s || '—';
+    }
+
+    function performSearch() {
+      try {
+        var input = document.getElementById('searchInput');
+        if (!input) return;
+        var query = (input.value || '').trim().toLowerCase();
+        var container = document.getElementById('searchResults');
+        if (!container) return;
+
+        if (!query || query.length < 1) {
+          container.innerHTML = '<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">ابدأ البحث</div></div>';
+          return;
+        }
+
+        // Use __bookMap (O(1) memory lookup, no IDB read)
+        var results = [];
+        var searchFilter = window.searchFilter || 'All';
+        var map = window.__bookMap;
+        if (!map || map.size === 0) {
+          // Fallback: if bookMap empty, do a dbAll but only once
+          container.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">جارٍ التحميل...</div></div>';
+          Promise.resolve(typeof window.dbAll === 'function' ? window.dbAll() : []).then(function (books) {
+            if (!Array.isArray(books)) return;
+            for (var i = 0; i < books.length && results.length < MAX_RESULTS; i++) {
+              var b = books[i];
+              if (!b) continue;
+              if (__v4rMatchBook(b, query, searchFilter)) results.push(b);
+            }
+            __v4rRenderResults(container, results, query, esc, stBadge, stAr);
+          }).catch(function () {});
+          return;
+        }
+
+        // Fast path: iterate __bookMap (already in memory)
+        var iter = map.values();
+        var next = iter.next();
+        while (!next.done && results.length < MAX_RESULTS) {
+          var b = next.value;
+          if (b && __v4rMatchBook(b, query, searchFilter)) results.push(b);
+          next = iter.next();
+        }
+        __v4rRenderResults(container, results, query, esc, stBadge, stAr);
+      } catch (e) { WARN('v4r search error:', e && e.message); }
+    }
+
+    window.doSearch = function () {
+      clearTimeout(__v4rSearchTimer);
+      __v4rSearchTimer = setTimeout(performSearch, DEBOUNCE_MS);
+    };
+
+    // Prevent Enter key from reloading page (in case there's a wrapping form)
+    try {
+      var si = document.getElementById('searchInput');
+      if (si && !si.__v4rKeyGuard) {
+        si.__v4rKeyGuard = true;
+        si.addEventListener('keydown', function (e) {
+          if (e && e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            // Trigger immediate search on Enter
+            clearTimeout(__v4rSearchTimer);
+            performSearch();
+          }
+        });
+      }
+    } catch (e) {}
+
+    // Also guard the homeSearch input on the home page
+    try {
+      var hs = document.getElementById('homeSearch');
+      if (hs && !hs.__v4rKeyGuard) {
+        hs.__v4rKeyGuard = true;
+        hs.addEventListener('keydown', function (e) {
+          if (e && e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        });
+        // Prevent typing in homeSearch from doing anything weird —
+        // it should just navigate to search page on any input
+        hs.addEventListener('input', function () {
+          try {
+            var val = hs.value || '';
+            if (val.length > 0) {
+              window.nav('search');
+              setTimeout(function () {
+                var si2 = document.getElementById('searchInput');
+                if (si2) { si2.value = val; si2.focus(); window.doSearch(); }
+                hs.value = '';
+              }, 50);
+            }
+          } catch (e2) {}
+        });
+      }
+    } catch (e) {}
+
+    __v4rSearchPatched = true;
+    LOG('v4r search fix installed (debounce=' + DEBOUNCE_MS + 'ms, max=' + MAX_RESULTS + ')');
+  }
+
+  function __v4rMatchBook(b, query, filter) {
+    var title  = (b.title || '').toLowerCase();
+    var author = (b.author || '').toLowerCase();
+    var pub    = (b.publisher || '').toLowerCase();
+    if (filter === 'Title')     return title.includes(query);
+    if (filter === 'Author')    return author.includes(query);
+    if (filter === 'Publisher') return pub.includes(query);
+    return title.includes(query) || author.includes(query) || pub.includes(query);
+  }
+
+  function __v4rRenderResults(container, results, query, esc, stBadge, stAr) {
+    if (!results.length) {
+      container.innerHTML = query
+        ? '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">لا توجد نتائج</div></div>'
+        : '<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">ابدأ البحث</div></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+      var b = results[i];
+      html += '<div class="card clickable" onclick="showDet(' + b.record_id + ')">'
+        + '<div class="card-title">' + esc(b.title) + '</div>'
+        + '<div class="card-subtitle">' + esc(b.author || '—') + '</div>'
+        + '<div class="card-meta"><span>' + esc(b.publisher || '—') + '</span>'
+        + '<span class="badge ' + stBadge(b.inventory_status) + '">' + stAr(b.inventory_status) + '</span></div>';
+      if (!b.internal_barcode && b.inventory_status !== 'Found') {
+        html += '<button class="btn btn-success btn-small" style="margin-top:10px;width:100%;" '
+          + 'onclick="cfDirect(' + b.record_id + ');event.stopPropagation();">✅ تأكيد</button>';
+      }
+      html += '</div>';
+    }
+    if (results.length >= 100) {
+      html += '<div class="empty-state" style="padding:16px;opacity:0.7"><div class="empty-text">⬆ أول 100 نتيجة — حدّد البحث للمزيد</div></div>';
+    }
+    container.innerHTML = html;
+  }
 
   // V4 FIX: re-assert our patched UI functions in case app.v5c.js's
   // hoisted `function loadReports(){}` / `function showDet(){}` / `function renderList(){}`
@@ -2297,6 +2511,8 @@
     // This keeps sync O(1) even if __bookMap was rebuilt by a fresh pull.
     try { rebuildCloudIdIndex(); } catch (e) {}
     try { setupDeweyEnricher(); } catch (e) {}
+    // v4r: install debounced search fix
+    try { __v4rInstallSearchFix(); } catch (e) {}
   }
   // Expose for manual debugging / external re-arming
   window.__v4ReassertPatches = reassertV4Patches;
